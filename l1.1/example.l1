@@ -1,0 +1,43 @@
+
+data Nat {
+	Z,
+	S(Nat),
+}
+
+data Tree {
+	Leaf(Nat),
+	Branch(Tree, Tree),
+}
+
+fn plus(x : Nat, y : Nat) -> Nat {
+	match x {
+		Nat::Z => y,
+		Nat::S(x) => plus(x, Nat::S(y)),
+	}
+}
+
+fn count(x : Tree) -> Nat {
+	match x {
+		Tree::Leaf(_) => Nat::S(Nat::Z()),
+		Tree::Branch(a, b) => plus(
+			Nat::S(Nat::Z()),
+			plus(count(a), count(b)),
+		),
+	}
+}
+
+fn sum_up(x : Tree) -> Nat {
+	match x {
+		Tree::Leaf(x) => x,
+		Tree::Branch(a, b) => plus(sum_up(a), sum_up(b))
+	}
+}
+
+fn main() {
+	let a = Tree::Leaf(Nat::Z());
+	let b = Tree::Leaf(Nat::S(Nat::Z()));
+	let c = Tree::Leaf(Nat::S(Nat::S(Nat::Z())));
+	let t1 = Tree::Branch(a, Tree::Branch(b, c));
+	count(t1)
+}
+
