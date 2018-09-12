@@ -26,10 +26,13 @@ allowed_variadic = set([
 
 tag_rules = {
 	"topLevelDef": ["def"],
+	"letStatement": ["name", "expr"],
+	"exprStatement": ["expr"],
 	"dataDeclaration": ["name", "constructors"],
 	"dataConstructorSpec": ["name", "fields"],
 	"fnDeclaration": ["name", "args", "returnType", "code"],
 	"appExpr": ["fn", "args"],
+	"lambdaExpr": ["args", "returnType", "result"],
 	"typeGeneric": ["generic", "args"],
 	"matchArm": ["pattern", "result"],
 	"matchExpr": ["matchee", "arms"],

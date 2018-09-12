@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import sys
 import UnionFind
 
 class HashableMixin:
@@ -30,6 +31,9 @@ class MonoType(HashableMixin):
 
 class PolyType(HashableMixin):
 	def __init__(self, binders, mono):
+		assert isinstance(binders, set)
+		assert all(isinstance(binder, MonoType) and binder.kind == "var" for binder in binders)
+		assert isinstance(mono, MonoType)
 		self.binders = binders
 		self.mono = mono
 
@@ -67,7 +71,7 @@ def free_type_variables(x):
 	"""
 	if isinstance(x, MonoType):
 		if x.kind == "var":
-			return set([x.contents])
+			return set([x])
 		elif x.kind == "link":
 			return free_type_variables(x.contents)
 	elif isinstance(x, PolyType):
@@ -93,6 +97,8 @@ class Inference:
 		Critically, if either t1 or t2's current union sets contains a link then we recursively union the respective links.
 		"""
 #		print "Equating:", t1, t2
+		# TODO: Add occurs check!
+
 		# Canonicalize our types into existing union sets.
 		t1, t2 = self.unions[t1], self.unions[t2]
 		# Union together the two types, links or not.
@@ -178,24 +184,27 @@ class Inference:
 			raise ValueError("Unknown variable: %r" % (expr,))
 		elif expr.kind == "app":
 			# Get types for the two parts.
-			fn, arg = expr.contents
-			fn_t, arg_t = self.J(gamma, fn, depth=depth+1), self.J(gamma, arg, depth=depth+1)
+			fn = expr.contents[0]
+			fn_type = self.J(gamma, fn, depth=depth+1)
+			args = expr.contents[1:]
+			arg_types = [self.J(gamma, arg, depth=depth+1) for arg in args]
 			# Create a new type, and add an equation.
 			result_type = self.new_type()
-			self.equate(fn_t, MonoType("link", [arg_t, result_type], link_name="fun"))
+			self.equate(fn_type, MonoType("link", arg_types + [result_type], link_name="fun"))
 			return result_type
 		elif expr.kind == "abs":
-			arg, result_expr = expr.contents
-			assert arg.kind == "var"
+			args = expr.contents[:-1]
+			result_expr = expr.contents[-1]
+			assert all(arg.kind == "var" for arg in args)
 			# Do inference on the result expression, in a context where the argument has a fresh type.
-			arg_type = self.new_type()
+			arg_types = [self.new_type() for _ in args]
 			gamma_prime = gamma.copy()
-			gamma_prime[arg] = PolyType(set(), arg_type)
+			for arg, arg_type in zip(args, arg_types):
+				gamma_prime[arg] = PolyType(set(), arg_type)
 			result_type = self.J(gamma_prime, result_expr, depth=depth+1)
-			return MonoType("link", [arg_type, result_type], link_name="fun")
+			return MonoType("link", arg_types + [result_type], link_name="fun")
 		elif expr.kind == "let":
 			# TODO: Let polymorphism.
-			# TODO: The type scheme thing? We'll see how things go wrong.
 			var, expr1, expr2 = expr.contents
 			assert var.kind == "var"
 			# Do inference on the variable's expression.

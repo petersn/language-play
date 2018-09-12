@@ -71,8 +71,22 @@ class Evaluator:
 				if match_context != None:
 					return self.evaluate(arm["result"], match_context)
 			raise RuntimeError("Non-exhaustive pattern match!")
-		else:
-			raise NotImplementedError("Unhandled case: %r" % (kind,))
+		raise NotImplementedError("Unhandled case: %r" % (kind,))
+
+	def run_statements(self, statements, context):
+		return_value = None
+		for statement in statements:
+			kind = statement.name
+			if kind == "letStatement":
+				name, = statement["name"].contents
+				context[name] = self.evaluate(statement["expr"], context)
+			elif kind == "exprStatement":
+				return_value = self.evaluate(statement["expr"], context)
+			else:
+				raise NotImplementedError("Unhandled statement: %r" % (statement,))
+		if return_value is None:
+			raise RuntimeError("Failure to return value!")
+		return return_value
 
 	def produce_match_context(self, matchee, pattern, context):
 		match_context = Context({}, parent=context)
@@ -109,13 +123,12 @@ class Evaluator:
 
 	def perform_call(self, fn, args):
 		if fn.name == "fnDeclaration":
-			body, = fn["code"]
 			if len(args) != len(fn["args"]):
 				raise RuntimeError("Argument count mismatch: %s expected %i, got %i." % (fn["name"], len(fn["args"]), len(args)))
 			scope_context = Context({}, parent=self.global_context)
 			for (arg_name, arg_type), arg_value in zip(fn["args"], args):
 				scope_context[arg_name] = arg_value
-			return self.evaluate(body, scope_context)
+			return self.run_statements(fn["code"], scope_context)
 		elif fn.name == "dataConstructorSpec":
 			if len(args) != len(fn["fields"]):
 				raise RuntimeError("Constructor argument count mismatch: expected %i, got %i." % (len(fn["fields"]), len(args)))

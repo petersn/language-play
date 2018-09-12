@@ -57,9 +57,16 @@ typeList
 	| typeExpression ( ',' typeExpression ) * ',' ?
 	;
 
-codeBlock
-	: expr
+codeBlock : statement * ;
+
+statement
+	: letStatement
+	| exprStatement
 	;
+
+letStatement : 'let' qualName '=' expr ';' ;
+
+exprStatement : expr ;
 
 // ANTLR4 only handles left-recursive rules if they're all together as one rule, so we list everything left-recursive here.
 expr
@@ -75,10 +82,13 @@ appExpr
 nonAppExpr
 	: matchExpr
 	| qualName
+	| lambdaExpr
 	| letExpr
 	| '(' expr ')'
 	| '{' expr '}'
 	;
+
+lambdaExpr : '|' argList '|' optionalReturnTypeAnnot expr ;
 
 matchExpr : 'match' expr '{' matchArms '}' ;
 
@@ -120,7 +130,7 @@ exprList
 	| expr ( ',' expr ) * ',' ?
 	;
 
-letExpr : 'let' qualName '=' expr ';' expr ;
+letExpr : 'let' qualName '=' expr 'in' expr ;
 
 qualName : ( ident '::' ) * ident ;
 
@@ -129,6 +139,7 @@ ident : ID ;
 // Terminal rules.
 
 ID : [a-zA-Z0-9_]+ ;
-WS : [ \r\n\t]+ -> skip ;
+WS : [ \r\n\t]+ -> channel(HIDDEN) ;
 COMMENT : ( '//' ~[\r\n]* '\r'? '\n' ) -> skip ;
+BLOCKCOMMENT : '/*' .*? '*/' -> skip ;
 
