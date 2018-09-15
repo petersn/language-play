@@ -2,6 +2,8 @@
 
 import enum
 import parser
+import inference
+import traits
 
 def pretty_quantified_type_params(type_params):
 	assert isinstance(type_params, list)
@@ -104,6 +106,14 @@ class Thing:
 		self.name = name
 		self.parent.insert_thing(name, self)
 
+	def get_all_matching_things_in_scope(self, predicate):
+		if predicate(self):
+			yield self
+		for child in self.children.itervalues():
+			# yield from
+			for thing in child.get_all_matching_things_in_scope(predicate):
+				yield thing
+
 	def print_tree(self, depth=0):
 		indent = " " * (2 * depth)
 		print "%s%s" % (indent, self.name)
@@ -122,6 +132,15 @@ class DataTypeBlock(Thing):
 		for constructor in ast["constructors"]:
 			DataConstructor(self, constructor)
 
+	def extract_for_trait_solving(self, extraction_context):
+		data_def = traits.DataDef(
+			name=self.get_fully_qualified_name(),
+			args=[],
+			bounds=[],
+		)
+		extraction_context[data_def.name] = data_def
+		return data_def
+
 class DataConstructorBlock(Thing):
 	def construct(self, ast):
 		self.ast = ast
@@ -138,12 +157,40 @@ class TraitBlock(Thing):
 		self.insert_and_set_name(NameKind.TYPE, ast["name"])
 		self.universe.add_definitions(self.ast["body"], self)
 
+	def extract_for_trait_solving(self, extraction_context):
+		trait_def = traits.TraitDef(
+			name=self.get_fully_qualified_name(),
+			args=[],
+			bounds=[],
+		)
+		extraction_context[trait_def.name] = trait_def
+		return trait_def
+
 class ImplBlock(Thing):
 	def construct(self, ast):
 		self.ast = ast
 		# Impls are handled a little specially, and are just stored unsorted.
 		self.parent.impl_collection.append(self)
 		self.universe.add_definitions(self.ast["body"], self)
+
+	def extract_for_trait_solving(self, extraction_context):
+		print self.ast
+		quantified_args = []
+		bounds = []
+		for var_name, var_bound in self.ast["quantifiedTypeParams"]:
+			var = inference.MonoType("var", var_name)
+			quantified_args.append(var)
+			for bound in var_bound:
+				bounds.append(traits.TypeBound(
+					var,
+					Helpers.extract_trait_expr(extraction_context, self.parent, bound),
+				))
+		return traits.Impl(
+			quantified_args=quantified_args,
+			bounds=bounds,
+			trait_expr=Helpers.extract_trait_expr(extraction_context, self.parent, self.ast["trait"]),
+			type_expr=Helpers.extract_type_expr(self.parent, self.ast["forType"]),
+		)
 
 	def __repr__(self):
 		return "{impl%s %s for %s}" % (
@@ -172,6 +219,7 @@ class Namespace(Thing):
 		indent = " " * (2 * depth)
 		print "%s Impls: %r" % (indent, self.impl_collection)
 
+"""
 class Type:
 	def __init__(self, block, arguments):
 		self.block = block
@@ -197,27 +245,46 @@ class TypeVariable:
 
 	def __repr__(self):
 		return "?%s" % (self.name,)
+"""
 
 class Helpers:
 	@staticmethod
-	def extract_type(namespace, ast):
+	def extract_type_expr(namespace, ast, require_trait=False):
+		required_type = {
+			False: DataTypeBlock,
+			True: TraitBlock,
+		}[require_trait]
 		if ast.name == "qualName":
 			try:
 				type_block = namespace.lookup(NameKind.TYPE, ast)
 			except KeyError:
 				# If we don't find a binding for the qualName and the path is of length 1, then it's a type variable.
 				# First make sure the path is of length 1.
-				if len(namespace.qualName_to_path(ast)) != 1:
+				if len(namespace.qualName_to_path(ast)) != 1 or require_trait:
 					raise ValueError("Cannot find type reference: %r" % (ast,))
 				var_name, = ast.contents
-				return TypeVariable(var_name)
-			assert isinstance(type_block, (TraitBlock, DataTypeBlock))
-			return Type(type_block, [])
+				return inference.MonoType("var", var_name)
+			assert isinstance(type_block, required_type)
+			# XXX: I don't like this reference of types by strings for inference...
+			link_name = type_block.get_fully_qualified_name()
+			return inference.MonoType("link", [], link_name=link_name)
 		elif ast.name == "typeGeneric":
 			type_block = namespace.lookup(NameKind.TYPE, ast["generic"])
-			assert isinstance(type_block, (TraitBlock, DataTypeBlock))
-			return Type(type_block,	[Helpers.extract_type(namespace, arg) for arg in ast["args"]])
+			assert isinstance(type_block, required_type)
+			# XXX: ... it's also going on here.
+			link_name = type_block.get_fully_qualified_name()
+			return inference.MonoType("link", [
+				Helpers.extract_type_expr(namespace, arg)
+				for arg in ast["args"]
+			], link_name=link_name)
 		raise NotImplementedError("Unhandled type expression: %r" % (ast,))
+
+	@staticmethod
+	def extract_trait_expr(extraction_context, namespace, ast):
+		monotype = Helpers.extract_type_expr(namespace, ast, require_trait=True)
+		assert monotype.kind == "link", "Currently we don't allow extracting trait exprs that are just a variable, because we don't allow the HKT that would entail."
+		# Convert the outermost layer of the monotype into a trait expression.
+		return traits.TraitExpr(extraction_context[monotype.link_name], monotype.contents)
 
 class Universe:
 	def __init__(self):
@@ -256,22 +323,43 @@ class Universe:
 
 	def do_queries(self):
 		print "=== Doing queries."
+		self.build_trait_solver()
+
 		for query in self.queries:
 			assert query.name == "query"
 			query = query["query"]
 			getattr(self, "do_" + query.name)(query)
 
+	def build_trait_solver(self):
+		self.trait_solver = traits.TraitSolver()
+
+		get_blocks = lambda cls: list(self.root_namespace.get_all_matching_things_in_scope(
+			lambda thing: isinstance(thing, cls),
+		))
+
+		self.extraction_context = {}
+
+		# Add data type blocks, so they can propogate their type parameter trait bounds appropriately.
+		for data_type_block in get_blocks(DataTypeBlock):
+			self.trait_solver.datas.append(data_type_block.extract_for_trait_solving(self.extraction_context))
+
+		# Add trait blocks, so they can propagate something?
+		for trait_block in get_blocks(TraitBlock):
+			self.trait_solver.traits.append(trait_block.extract_for_trait_solving(self.extraction_context))
+
+		# Add impls, because they're clearly necessary!
+		for impl_block in self.root_namespace.impl_collection:
+			self.trait_solver.impls.append(impl_block.extract_for_trait_solving(self.extraction_context))
+
 	def do_traitQuery(self, query):
-		print "\nDoing query."#, query
-		trait = Helpers.extract_type(self.root_namespace, query["trait"])
-		test_type = Helpers.extract_type(self.root_namespace, query["type"])
+		print "\nDoing query:", query
+		trait = Helpers.extract_trait_expr(self.extraction_context, self.root_namespace, query["trait"])
+		test_type = Helpers.extract_type_expr(self.root_namespace, query["type"])
 		print "Trait:", trait
 		print "Test type:", test_type
-		print "Trait check:", self.check_trait(trait, test_type)
-
-	def check_trait(self, trait, test_type, context=None):
-		
-		return True
+		result = self.trait_solver.check(traits.SolverContext(), trait, test_type)
+		print "Query result:", result
+#		print "Trait check:", self.check_trait(trait, test_type)
 
 if __name__ == "__main__":
 	u = Universe()

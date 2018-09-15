@@ -29,6 +29,20 @@ class MonoType(HashableMixin):
 				"".join(" " + str(c) for c in self.contents),
 			)
 
+	def apply_type_subs(self, type_subs):
+		if self in type_subs:
+			return type_subs[self]
+		if self.kind == "link":
+			return MonoType(
+				self.kind,
+				[
+					c.apply_type_subs(type_subs)
+					for c in self.contents
+				],
+				link_name=self.link_name,
+			)
+		return self
+
 class PolyType(HashableMixin):
 	def __init__(self, binders, mono):
 		assert isinstance(binders, set)
@@ -84,11 +98,19 @@ def free_type_variables(x):
 	print x
 	assert False
 
-class Inference:
+class UnificationError(Exception):
+	pass
+
+class UnificationContext:
 	def __init__(self):
 		self.unions = UnionFind.UnionFind()
 		self.union_set_links = {}
-		self.type_counter = 0
+
+	def copy(self):
+		u = UnificationContext()
+		u.unions = self.unions.copy()
+		u.union_set_links = self.union_set_links.copy()
+		return u
 
 	def equate(self, t1, t2):
 		"""equate(t1, t2) -> None
@@ -96,6 +118,8 @@ class Inference:
 		Add the constraint that the t1 and t2 type expressions must be equal.
 		Critically, if either t1 or t2's current union sets contains a link then we recursively union the respective links.
 		"""
+		assert isinstance(t1, MonoType)
+		assert isinstance(t2, MonoType)
 #		print "Equating:", t1, t2
 		# TODO: Add occurs check!
 
@@ -112,7 +136,7 @@ class Inference:
 			l1, l2 = self.union_set_links[t1], self.union_set_links[t2]
 			assert l1.kind == l2.kind == "link"
 			if len(l1.contents) != len(l2.contents) or l1.link_name != l2.link_name:
-				raise ValueError("Cannot unify %r with %r" % (l1, l2))
+				raise UnificationError("Cannot unify %r with %r" % (l1, l2))
 			for a, b in zip(l1.contents, l2.contents):
 				self.equate(a, b)
 		# If at least one of the two has a union set link then store it as the new union set link for them both.
@@ -137,6 +161,11 @@ class Inference:
 				link_name=t.link_name,
 			)
 		return t
+
+class Inference:
+	def __init__(self):
+		self.unification_context = UnificationContext()
+		self.type_counter = 0
 
 	def inst(self, poly_t):
 		"""inst(poly_t: PolyType) -> a new MonoType
@@ -190,7 +219,7 @@ class Inference:
 			arg_types = [self.J(gamma, arg, depth=depth+1) for arg in args]
 			# Create a new type, and add an equation.
 			result_type = self.new_type()
-			self.equate(fn_type, MonoType("link", arg_types + [result_type], link_name="fun"))
+			self.unification_context.equate(fn_type, MonoType("link", arg_types + [result_type], link_name="fun"))
 			return result_type
 		elif expr.kind == "abs":
 			args = expr.contents[:-1]
@@ -228,11 +257,11 @@ if __name__ == "__main__":
 	print t1
 
 	inf = Inference()
-	inf.equate(a, c)
-	inf.equate(b, t_bool)
-	inf.equate(a, b)
+	inf.unification_context.equate(a, c)
+	inf.unification_context.equate(b, t_bool)
+	inf.unification_context.equate(a, b)
 
-	print inf.most_specific_type(c)
+	print inf.unification_context.most_specific_type(c)
 
 	e1 = Expr("let", [
 		Expr("var", "id"),
@@ -265,5 +294,5 @@ if __name__ == "__main__":
 		},
 		e5,
 	)
-	print inf.most_specific_type(final_type)
+	print inf.unification_context.most_specific_type(final_type)
 

@@ -5,43 +5,6 @@ import UnionFind
 import inference
 import core
 
-class TypeExpr(inference.HashableMixin):
-	"""TypeExpr
-
-	Represents a type, potentially with variables as holes.
-	"""
-	def __init__(self, kind, contents):
-		assert kind in ("var", "app")
-		self.kind = kind
-		self.contents = contents
-
-	def key(self):
-		return self.kind, tuple(self.contents)
-
-	def __repr__(self):
-		if self.kind == "var":
-			name, = self.contents
-			return "?%s" % (name,)
-		elif self.kind == "app":
-			return "%s{%s}" % (
-				self.contents[0].name,
-				", ".join(repr(type_arg) for type_arg in self.contents[1:]),
-			)
-		raise NotImplementedError("Unhandled: %r" % (self.kind,))
-
-	def apply_type_subs(self, type_subs):
-		if self in type_subs:
-			return type_subs[self]
-		if self.kind == "app":
-			return TypeExpr(
-				self.kind,
-				[self.contents[0]] + [
-					type_arg.apply_type_subs(type_subs)
-					for type_arg in self.contents[1:]
-				],
-			)
-		return self
-
 class TraitExpr(inference.HashableMixin):
 	"""TraitExpr
 
@@ -51,7 +14,7 @@ class TraitExpr(inference.HashableMixin):
 	def __init__(self, base_trait, type_parameters):
 		assert isinstance(base_trait, TraitDef)
 		assert isinstance(type_parameters, list)
-		assert all(isinstance(i, TypeExpr) for i in type_parameters)
+		assert all(isinstance(i, inference.MonoType) for i in type_parameters)
 		self.base_trait = base_trait
 		self.type_parameters = type_parameters
 
@@ -70,9 +33,10 @@ class TraitExpr(inference.HashableMixin):
 			for type_param in self.type_parameters
 		])
 
-
 class TypeBound(inference.HashableMixin):
 	def __init__(self, ty, trait):
+		assert isinstance(ty, inference.MonoType)
+		assert isinstance(trait, TraitExpr)
 		self.ty = ty
 		self.trait = trait
 
@@ -82,10 +46,16 @@ class TypeBound(inference.HashableMixin):
 	def __repr__(self):
 		return "%s: %s" % (self.ty, self.trait)
 
+	def apply_type_subs(self, type_subs):
+		return TypeBound(
+			self.ty.apply_type_subs(type_subs),
+			self.trait.apply_type_subs(type_subs),
+		)
+
 class BlockDef(inference.HashableMixin):
 	def __init__(self, name, args, bounds):
 		assert isinstance(name, str)
-		assert all(isinstance(i, TypeExpr) for i in args)
+		assert all(isinstance(i, inference.MonoType) for i in args)
 		assert all(isinstance(i, TypeBound) for i in bounds)
 		self.name = name
 		self.args = args
@@ -110,26 +80,29 @@ class TraitDef(BlockDef):
 
 class Impl:
 	def __init__(self, quantified_args, bounds, trait_expr, type_expr):
-		assert all(isinstance(i, TypeExpr) for i in quantified_args)
+		assert all(isinstance(i, inference.MonoType) for i in quantified_args)
 		assert all(isinstance(i, TypeBound) for i in bounds)
 		assert isinstance(trait_expr, TraitExpr)
-		assert isinstance(type_expr, TypeExpr)
+		assert isinstance(type_expr, inference.MonoType)
 		self.quantified_args = quantified_args
 		self.bounds = bounds
 		self.trait_expr = trait_expr
 		self.type_expr = type_expr
 
 	def get_fresh(self, ctx):
-		"""get_fresh() -> (TraitExpr, [TypeBound])
+		"""get_fresh() -> ([TypeBound], TraitExpr, inference.MonoType)
 		
 		Returns a tuple of:
-		0) The trait expression except with all quantified over type variables being replaced with fresh ones.
-		1) A list of the type bounds, but with the same substitution applied.
+		1) A list of the type bounds, but with the substitution applied.
+		2) The trait expression except with all quantified over type variables being replaced with fresh ones.
+		3) The type expression the impl is for, but with the same substitution applied.
 		"""
 		subs = {arg: ctx.new_type() for arg in self.quantified_args}
-		return [
-		]
-		return s
+		return (
+			[bound.apply_type_subs(subs) for bound in self.bounds],
+			self.trait_expr.apply_type_subs(subs),
+			self.type_expr.apply_type_subs(subs),
+		)
 
 	def __repr__(self):
 		return "impl<%s> %s for %s [%s]" % (
@@ -142,16 +115,19 @@ class Impl:
 class SolverContext:
 	def __init__(self):
 		self.next_type_variable = 0
-		self.var_unions = UnionFind.UnionFind()
+		self.unification_context = inference.UnificationContext()
+		self.all_bounds = []
 
 	def copy(self):
 		new_context = SolverContext()
 		new_context.next_type_variable = self.next_type_variable
-		new_context.type_unions = self.type_unions.copy()
+		new_context.unification_context = self.unification_context.copy()
+		new_context.all_bounds = self.all_bounds[:]
+		return new_context
 
 	def new_type(self):
 		self.next_type_variable += 1
-		return TypeExpr("var", [str(self.next_type_variable)])
+		return inference.MonoType("var", "?" + str(self.next_type_variable))
 
 class TraitSolver:
 	def __init__(self):
@@ -161,22 +137,46 @@ class TraitSolver:
 
 	def check(self, ctx, trait_expr, type_expr):
 		assert isinstance(trait_expr, TraitExpr)
-		assert isinstance(type_expr, TypeExpr)
+		assert isinstance(type_expr, inference.MonoType)
 		print "Checking %s for %s" % (trait_expr, type_expr)
 		for impl in self.impls:
-			self.unify_traits(ctx, trait_expr, impl.trait_expr)
+			print "  Testing:", impl
+			new_ctx = ctx.copy()
+			# In order to see if we can possibly use this impl we need to accumulate all relevant bounds.
+			fresh_bounds, fresh_trait, fresh_type = impl.get_fresh(new_ctx)
+			try:
+				self.unify_traits(new_ctx, trait_expr, fresh_trait)
+				self.unify_types(new_ctx, type_expr, fresh_type)
+			except inference.UnificationError, e:
+				print "      Unification error:", e
+				continue
+			new_ctx.all_bounds.extend(fresh_bounds)
+			if self.check_bounds(new_ctx):
+				return True
+		print "Failed to find an impl!"
+		return False
+
+	def check_bounds(self, ctx):
+		print "    Checking bounds."
+		for bound in ctx.all_bounds:
+			specific_type = ctx.unification_context.most_specific_type(bound.ty)
+			print "      Bound: %s: %s" % (specific_type, bound.trait)
+			if not self.check(SolverContext(), bound.trait, specific_type):
+				print "Recursive check failed!"
+				return False
+		return True
 
 	def unify_traits(self, ctx, trait_expr1, trait_expr2):
-		print "Unifying traits:", trait_expr1, " == ", trait_expr2
+		print "    Unifying traits:", trait_expr1, " == ", trait_expr2
 		if trait_expr1.base_trait != trait_expr2.base_trait:
-			print "CANNOT unify; different base traits."
+			print "      CANNOT unify; different base traits."
 			return
 		for t1, t2 in zip(trait_expr1.type_parameters, trait_expr2.type_parameters):
 			self.unify_types(t1, t2)
 
 	def unify_types(self, ctx, type_expr1, type_expr2):
-		print "Unifying types:", type_expr1, " == ", type_expr2
-		ctx.equate_types
+		print "    Unifying types:", type_expr1, " == ", type_expr2
+		ctx.unification_context.equate(type_expr1, type_expr2)
 
 #		print trait_expr1, "unify", trait_expr2
 
@@ -194,7 +194,7 @@ class TraitSolver:
 if __name__ == "__main__":
 	solver = TraitSolver()
 	# Define the builtin types.
-	X = TypeExpr("var", ["X"])
+	X = inference.MonoType("var", "?X")
 	Num = DataDef("Num", [], [])
 	Str = DataDef("Str", [], [])
 	Vec = DataDef("Vec", [X], [])
@@ -210,15 +210,25 @@ if __name__ == "__main__":
 		[],
 		[],
 		TraitExpr(Clone, []),
-		TypeExpr("app", [Num]),
+		inference.MonoType("link", [], link_name="Num"),
 	))
-#	solver.impls.append(Impl(
-#		[],
-#		[],
-#		TraitExpr(Magical, []),
-#		TypeExpr("app", [Wizard])
-#	))
+	solver.impls.append(Impl(
+		[X],
+		[
+			TypeBound(X, TraitExpr(Clone, [])),
+		],
+		TraitExpr(Clone, []),
+		inference.MonoType("link", [X], link_name="Vec")
+	))
 
 	ctx = SolverContext()
-	solver.check(ctx, TraitExpr(Clone, []), TypeExpr("app", [Num]))
+	has_trait = solver.check(
+		ctx,
+		TraitExpr(Clone, []),
+#		inference.MonoType("link", [], link_name="Str"),
+		inference.MonoType("link", [
+			inference.MonoType("link", [], link_name="Num"),
+		], link_name="Vec"),
+	)
+	print "Result:", has_trait
 

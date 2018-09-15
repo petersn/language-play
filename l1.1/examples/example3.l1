@@ -1,0 +1,13 @@
+
+data Num {}
+data Str {}
+data Vec<T> {}
+trait Show {}
+impl Show for Num {}
+impl<T: Show> Show for Vec<T> {}
+
+//#queryTrait [ Show for Num ]
+//#queryTrait [ Show for Str ]
+#queryTrait [ Show for Vec<Num> ]
+//#queryTrait [ Show for Vec<Str> ]
+
