@@ -50,7 +50,7 @@ class Evaluator:
 		elif kind == "fnDeclaration":
 			self.global_context[defin["name"]] = defin
 		else:
-			assert False
+			raise NotImplementedError("Unhandled top level definition: %r" % (defin,))
 
 	def evaluate(self, expr, context):
 		kind = expr.name
@@ -143,9 +143,15 @@ if __name__ == "__main__":
 	with open(args.source) as f:
 		source = f.read()
 
-	print "Launching!"
-
 	ast = parser.parse(source)
+
+	import core
+	u = core.Universe()
+	u.add_definitions(ast)
+	u.root_namespace.print_tree()
+	u.do_queries()
+
+	exit()
 
 	print "Parsed"
 

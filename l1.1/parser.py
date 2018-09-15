@@ -26,11 +26,15 @@ allowed_variadic = set([
 
 tag_rules = {
 	"topLevelDef": ["def"],
-	"letStatement": ["name", "expr"],
+	"letStatement": ["name", "optionalTypeAnnot", "expr"],
 	"exprStatement": ["expr"],
-	"dataDeclaration": ["name", "constructors"],
+	"dataDeclaration": ["name", "typeParams", "constructors"],
 	"dataConstructorSpec": ["name", "fields"],
-	"fnDeclaration": ["name", "args", "returnType", "code"],
+	"traitDeclaration": ["name", "typeParams", "body"],
+	"implDeclaration": ["quantifiedTypeParams", "trait", "forType", "body"],
+	"fnDeclaration": ["name", "typeParams", "args", "returnType", "code"],
+	"fnStub": ["name", "typeParams", "args", "returnType"],
+	"parameterStub": ["name", "typeAnnot"],
 	"appExpr": ["fn", "args"],
 	"lambdaExpr": ["args", "returnType", "result"],
 	"typeGeneric": ["generic", "args"],
@@ -39,9 +43,12 @@ tag_rules = {
 	"matchHole": [],
 	"matchVariable": ["name"],
 	"matchConstructor": ["name", "fieldNames"],
-	"letExpr": ["name", "expr1", "expr2"],
+	"letExpr": ["name", "optionalTypeAnnot", "expr1", "expr2"],
 	"qualName": None,
 	"ident": None,
+	"query": ["query"],
+	"typeQuery": ["expr"],
+	"traitQuery": ["trait", "type"],
 }
 
 untagged_rules = set([
@@ -52,6 +59,8 @@ untagged_rules = set([
 	"exprList",
 	"typeList",
 	"optionalTypeList",
+	"optionalGenericParameters",
+	"optionalTypeParameterList",
 	"argList",
 	"argSpec",
 	"optionalTypeAnnot",

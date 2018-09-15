@@ -6,10 +6,16 @@ main : topLevelDef * ;
 
 topLevelDef
 	: dataDeclaration
+	| traitDeclaration
+	| implDeclaration
 	| fnDeclaration
+	| fnStub
+	| letStatement
+	| parameterStub
+	| query
 	;
 
-dataDeclaration : 'data' ident '{' dataConstructorList '}' ;
+dataDeclaration : 'data' ident optionalTypeParameterList '{' dataConstructorList '}' ;
 
 dataConstructorList
 	:
@@ -21,10 +27,23 @@ dataConstructorSpec : ident optionalTypeList ;
 // Duplication here with typeList to avoid the extra entries in the AST.
 optionalTypeList
 	:
-	| ( '(' typeExpression ( ',' typeExpression ) * ',' ? ')' )
+	| '(' typeExpression ( ',' typeExpression ) * ',' ? ')'
 	;
 
-fnDeclaration : 'fn' ident '(' argList ')' optionalReturnTypeAnnot '{' codeBlock '}' ;
+optionalTypeParameterList
+	:
+	| '<' argSpec ( ',' argSpec ) * ',' ? '>'
+	;
+
+traitDeclaration : 'trait' ident optionalTypeParameterList '{' main '}' ;
+
+implDeclaration : 'impl' optionalTypeParameterList typeExpression 'for' typeExpression '{' main '}' ;
+
+fnDeclaration : fnCore '{' codeBlock '}' ;
+
+fnStub : fnCore ';' ;
+
+fnCore : 'fn' ident optionalTypeParameterList '(' argList ')' optionalReturnTypeAnnot ;
 
 optionalTypeAnnot
 	:
@@ -57,6 +76,10 @@ typeList
 	| typeExpression ( ',' typeExpression ) * ',' ?
 	;
 
+parameterStub : 'parameter' ident typeAnnotation ';' ;
+
+// Various definitions specific to imperative code and expressions.
+
 codeBlock : statement * ;
 
 statement
@@ -64,7 +87,7 @@ statement
 	| exprStatement
 	;
 
-letStatement : 'let' qualName '=' expr ';' ;
+letStatement : 'let' ident optionalTypeAnnot '=' expr ';' ;
 
 exprStatement : expr ;
 
@@ -130,11 +153,22 @@ exprList
 	| expr ( ',' expr ) * ',' ?
 	;
 
-letExpr : 'let' qualName '=' expr 'in' expr ;
+letExpr : 'let' ident optionalTypeAnnot '=' expr 'in' expr ;
 
 qualName : ( ident '::' ) * ident ;
 
 ident : ID ;
+
+// Separate query language.
+
+query
+	: typeQuery
+	| traitQuery
+	;
+
+typeQuery : '#queryType' '[' expr ']' ;
+
+traitQuery : '#queryTrait' '[' typeExpression 'for' typeExpression ']' ;
 
 // Terminal rules.
 

@@ -97,3 +97,11 @@ class UnionFind:
             if r != heaviest:
                 self.weights[heaviest] += self.weights[r]
                 self.parents[r] = heaviest
+
+    def copy(self):
+        """Return a shallow copy UnionFind whose mutation won't affect the original."""
+        u = UnionFind()
+        u.weights = self.weights.copy()
+        u.parents = self.parents.copy()
+        return u
+
