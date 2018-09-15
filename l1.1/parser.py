@@ -28,6 +28,14 @@ tag_rules = {
 	"topLevelDef": ["def"],
 	"letStatement": ["name", "optionalTypeAnnot", "expr"],
 	"exprStatement": ["expr"],
+	"ifStatement": ["expr", "body", "elifs", "else"],
+	"elifStatement": ["expr", "body"],
+	"elseStatement": ["body"],
+	"forStatement": ["name", "expr", "body"],
+	"whileStatement": ["expr", "body"],
+	"breakStatement": [],
+	"continueStatement": [],
+	"returnStatement": ["optionalExpr"],
 	"dataDeclaration": ["name", "typeParams", "constructors"],
 	"dataConstructorSpec": ["name", "fields"],
 	"traitDeclaration": ["name", "typeParams", "body"],
@@ -53,6 +61,7 @@ tag_rules = {
 
 untagged_rules = set([
 	"main",
+	"optionalElifStatements",
 	"dataConstructorList",
 	"matchArms",
 	"optionalMatchConArgNameList",
@@ -65,6 +74,7 @@ untagged_rules = set([
 	"argSpec",
 	"optionalTypeAnnot",
 	"optionalReturnTypeAnnot",
+	"optionalExpr",
 	"codeBlock",
 ])
 

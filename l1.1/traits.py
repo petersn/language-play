@@ -24,7 +24,7 @@ class TraitExpr(inference.HashableMixin):
 	def __repr__(self):
 		return "%s{%s}" % (
 			self.base_trait.name,
-			", ".join(type_param for type_param in self.type_parameters),
+			", ".join(str(type_param) for type_param in self.type_parameters),
 		)
 
 	def apply_type_subs(self, type_subs):
@@ -53,13 +53,14 @@ class TypeBound(inference.HashableMixin):
 		)
 
 class BlockDef(inference.HashableMixin):
-	def __init__(self, name, args, bounds):
+	def __init__(self, name, args, bounds, cookie=None):
 		assert isinstance(name, str)
 		assert all(isinstance(i, inference.MonoType) for i in args)
 		assert all(isinstance(i, TypeBound) for i in bounds)
 		self.name = name
 		self.args = args
 		self.bounds = bounds
+		self.cookie = cookie
 
 	def key(self):
 		return self.name, tuple(self.args), tuple(self.bounds)
@@ -79,7 +80,7 @@ class TraitDef(BlockDef):
 	block_name = "trait"
 
 class Impl:
-	def __init__(self, quantified_args, bounds, trait_expr, type_expr):
+	def __init__(self, quantified_args, bounds, trait_expr, type_expr, cookie=None):
 		assert all(isinstance(i, inference.MonoType) for i in quantified_args)
 		assert all(isinstance(i, TypeBound) for i in bounds)
 		assert isinstance(trait_expr, TraitExpr)
@@ -88,6 +89,7 @@ class Impl:
 		self.bounds = bounds
 		self.trait_expr = trait_expr
 		self.type_expr = type_expr
+		self.cookie = cookie
 
 	def get_fresh(self, ctx):
 		"""get_fresh() -> ([TypeBound], TraitExpr, inference.MonoType)
@@ -152,9 +154,8 @@ class TraitSolver:
 				continue
 			new_ctx.all_bounds.extend(fresh_bounds)
 			if self.check_bounds(new_ctx):
-				return True
+				return impl
 		print "Failed to find an impl!"
-		return False
 
 	def check_bounds(self, ctx):
 		print "    Checking bounds."

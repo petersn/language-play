@@ -134,9 +134,10 @@ class DataTypeBlock(Thing):
 
 	def extract_for_trait_solving(self, extraction_context):
 		data_def = traits.DataDef(
-			name=self.get_fully_qualified_name(),
+			name=self.get_name(), #self.get_fully_qualified_name(),
 			args=[],
 			bounds=[],
+			cookie=self,
 		)
 		extraction_context[data_def.name] = data_def
 		return data_def
@@ -159,9 +160,10 @@ class TraitBlock(Thing):
 
 	def extract_for_trait_solving(self, extraction_context):
 		trait_def = traits.TraitDef(
-			name=self.get_fully_qualified_name(),
+			name=self.get_name(), #self.get_fully_qualified_name(),
 			args=[],
 			bounds=[],
+			cookie=self,
 		)
 		extraction_context[trait_def.name] = trait_def
 		return trait_def
@@ -174,7 +176,6 @@ class ImplBlock(Thing):
 		self.universe.add_definitions(self.ast["body"], self)
 
 	def extract_for_trait_solving(self, extraction_context):
-		print self.ast
 		quantified_args = []
 		bounds = []
 		for var_name, var_bound in self.ast["quantifiedTypeParams"]:
@@ -190,6 +191,7 @@ class ImplBlock(Thing):
 			bounds=bounds,
 			trait_expr=Helpers.extract_trait_expr(extraction_context, self.parent, self.ast["trait"]),
 			type_expr=Helpers.extract_type_expr(self.parent, self.ast["forType"]),
+			cookie=self,
 		)
 
 	def __repr__(self):
@@ -219,34 +221,6 @@ class Namespace(Thing):
 		indent = " " * (2 * depth)
 		print "%s Impls: %r" % (indent, self.impl_collection)
 
-"""
-class Type:
-	def __init__(self, block, arguments):
-		self.block = block
-		self.arguments = arguments
-
-	def __repr__(self):
-		name = self.block.get_fully_qualified_name()
-		if self.arguments:
-			name += "<%s>" % (", ".join(
-				repr(arg) for arg in self.arguments
-			))
-		return name
-
-class TypeVariable:
-	def __init__(self, name):
-		self.name = name
-
-	def __eq__(self, other):
-		return isinstance(other, TypeVariable) and self.name == other.name
-
-	def __hash__(self):
-		return hash(self.name)
-
-	def __repr__(self):
-		return "?%s" % (self.name,)
-"""
-
 class Helpers:
 	@staticmethod
 	def extract_type_expr(namespace, ast, require_trait=False):
@@ -266,13 +240,15 @@ class Helpers:
 				return inference.MonoType("var", var_name)
 			assert isinstance(type_block, required_type)
 			# XXX: I don't like this reference of types by strings for inference...
-			link_name = type_block.get_fully_qualified_name()
+			#link_name = type_block.get_fully_qualified_name()
+			link_name = type_block.get_name()
 			return inference.MonoType("link", [], link_name=link_name)
 		elif ast.name == "typeGeneric":
 			type_block = namespace.lookup(NameKind.TYPE, ast["generic"])
 			assert isinstance(type_block, required_type)
 			# XXX: ... it's also going on here.
-			link_name = type_block.get_fully_qualified_name()
+			#link_name = type_block.get_fully_qualified_name()
+			link_name = type_block.get_name()
 			return inference.MonoType("link", [
 				Helpers.extract_type_expr(namespace, arg)
 				for arg in ast["args"]

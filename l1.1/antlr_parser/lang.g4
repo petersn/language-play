@@ -16,65 +16,31 @@ topLevelDef
 	;
 
 dataDeclaration : 'data' ident optionalTypeParameterList '{' dataConstructorList '}' ;
-
-dataConstructorList
-	:
-	| dataConstructorSpec ( ',' dataConstructorSpec ) * ',' ?
-	;
-
+dataConstructorList : | dataConstructorSpec ( ',' dataConstructorSpec ) * ',' ? ;
 dataConstructorSpec : ident optionalTypeList ;
 
 // Duplication here with typeList to avoid the extra entries in the AST.
-optionalTypeList
-	:
-	| '(' typeExpression ( ',' typeExpression ) * ',' ? ')'
-	;
-
-optionalTypeParameterList
-	:
-	| '<' argSpec ( ',' argSpec ) * ',' ? '>'
-	;
+optionalTypeList : | '(' typeExpression ( ',' typeExpression ) * ',' ? ')' ;
+optionalTypeParameterList : | '<' argSpec ( ',' argSpec ) * ',' ? '>' ;
 
 traitDeclaration : 'trait' ident optionalTypeParameterList '{' main '}' ;
 
 implDeclaration : 'impl' optionalTypeParameterList typeExpression 'for' typeExpression '{' main '}' ;
 
 fnDeclaration : fnCore '{' codeBlock '}' ;
-
 fnStub : fnCore ';' ;
-
 fnCore : 'fn' ident optionalTypeParameterList '(' argList ')' optionalReturnTypeAnnot ;
 
-optionalTypeAnnot
-	:
-	| typeAnnotation
-	;
-
-optionalReturnTypeAnnot
-	:
-	| '->' typeExpression
-	;
+optionalTypeAnnot : | typeAnnotation ;
+optionalReturnTypeAnnot : | '->' typeExpression ;
 
 typeAnnotation : ':' typeExpression ;
-
-typeExpression
-	: qualName
-	| typeGeneric
-	;
-
+typeExpression : qualName | typeGeneric ;
 typeGeneric : qualName '<' typeList '>' ;
 
-argList
-	:
-	| argSpec ( ',' argSpec ) * ',' ?
-	;
-
+argList : | argSpec ( ',' argSpec ) * ',' ? ;
 argSpec : ident optionalTypeAnnot ;
-
-typeList
-	:
-	| typeExpression ( ',' typeExpression ) * ',' ?
-	;
+typeList : | typeExpression ( ',' typeExpression ) * ',' ? ;
 
 parameterStub : 'parameter' ident typeAnnotation ';' ;
 
@@ -85,17 +51,30 @@ codeBlock : statement * ;
 statement
 	: letStatement
 	| exprStatement
+	| ifStatement
+	| forStatement
+	| whileStatement
+	| returnStatement
 	;
 
 letStatement : 'let' ident optionalTypeAnnot '=' expr ';' ;
+exprStatement : expr ';' ;
 
-exprStatement : expr ;
+ifStatement : 'if' expr '{' codeBlock '}' optionalElifStatements optionalElseStatement ;
+optionalElifStatements : elifStatement * ;
+elifStatement : 'elif' expr '{' codeBlock '}' ;
+optionalElseStatement : | elseStatement ;
+elseStatement : 'else' '{' codeBlock '}' ;
+
+forStatement : 'for' ident 'in' expr '{' codeBlock '}' ;
+whileStatement : 'while' expr '{' codeBlock '}' ;
+
+breakStatement : 'break' ';' ;
+continueStatement : 'continue' ';' ;
+returnStatement : 'return' optionalExpr ';' ;
 
 // ANTLR4 only handles left-recursive rules if they're all together as one rule, so we list everything left-recursive here.
-expr
-	: appExpr
-	| nonAppExpr
-	;
+expr : appExpr | nonAppExpr ;
 
 appExpr
 	: appExpr '(' exprList ')'
@@ -111,63 +90,31 @@ nonAppExpr
 	| '{' expr '}'
 	;
 
+optionalExpr : | expr ;
+
 lambdaExpr : '|' argList '|' optionalReturnTypeAnnot expr ;
 
 matchExpr : 'match' expr '{' matchArms '}' ;
-
-matchArms
-	:
-	| matchArm ( ',' matchArm ) * ',' ?
-	;
-
+matchArms : | matchArm ( ',' matchArm ) * ',' ? ;
 matchArm : matchPattern '=>' expr ;
-
-matchPattern
-	: matchPrimitive
-	| matchConstructor
-	;
-
-matchConArgNameList
-	:
-	| matchPrimitive ( ',' matchPrimitive ) * ',' ?
-	;
-
-matchPrimitive
-	: matchHole
-	| matchVariable
-	;
-
+matchPattern : matchPrimitive | matchConstructor ;
+matchConArgNameList : | matchPrimitive ( ',' matchPrimitive ) * ',' ? ;
+matchPrimitive : matchHole | matchVariable ;
 matchConstructor : qualName optionalMatchConArgNameList ;
-
-optionalMatchConArgNameList
-	:
-	| '(' matchConArgNameList ')'
-	;
-
+optionalMatchConArgNameList : | '(' matchConArgNameList ')' ;
 matchHole : '_' ;
-
 matchVariable : ident ;
 
-exprList
-	:
-	| expr ( ',' expr ) * ',' ?
-	;
-
+exprList : | expr ( ',' expr ) * ',' ? ;
 letExpr : 'let' ident optionalTypeAnnot '=' expr 'in' expr ;
 
 qualName : ( ident '::' ) * ident ;
-
 ident : ID ;
 
 // Separate query language.
 
-query
-	: typeQuery
-	| traitQuery
-	;
-
+query : typeQuery | traitQuery ;
 typeQuery : '#queryType' '[' expr ']' ;
-
 traitQuery : '#queryTrait' '[' typeExpression 'for' typeExpression ']' ;
 
 // Terminal rules.
