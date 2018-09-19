@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 import argparse
-import parser
+import parsing
 
 class Context:
 	def __init__(self, mappings, parent=None):
@@ -143,7 +143,7 @@ if __name__ == "__main__":
 	with open(args.source) as f:
 		source = f.read()
 
-	ast = parser.parse(source)
+	ast = parsing.parse(source)
 
 	import core
 	u = core.Universe()
@@ -159,7 +159,7 @@ if __name__ == "__main__":
 	for top_level_def in ast:
 		ev.add_definition(top_level_def["def"])
 
-	main_call = parser.parse("main()", kind="expr")
+	main_call = parsing.parse("main()", kind="expr")
 	result = ev.evaluate(main_call, context=ev.global_context)
 
 	print "Final result:", result

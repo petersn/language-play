@@ -98,6 +98,28 @@ def free_type_variables(x):
 	print x
 	assert False
 
+def alpha_canonicalize(t, subs=None):
+	if subs is None:
+		subs = {}
+	if t.kind == "var":
+		if t not in subs:
+			new_name = "t%s" % (str(len(subs) + 1),)
+			subs[t] = MonoType("var", new_name)
+		return subs[t]
+	elif t.kind == "link":
+		return MonoType(
+			t.kind,
+			[
+				alpha_canonicalize(arg, subs=subs)
+				for arg in t.contents
+			],
+			link_name=t.link_name,
+		)
+	raise NotImplementedError("Unhandled: %r" % (t,))
+
+def alpha_equivalent(t1, t2):
+	return alpha_canonicalize(t1) == alpha_canonicalize(t2)
+
 class UnificationError(Exception):
 	pass
 
@@ -238,6 +260,7 @@ class Inference:
 			assert var.kind == "var"
 			# Do inference on the variable's expression.
 			var_t = self.J(gamma, expr1, depth=depth+1)
+			var_t = self.unification_context.most_specific_type(var_t)
 			# Contextually generalize the variable's type.
 			var_poly_t = self.contextual_generalization(gamma, var_t)
 			# Do inference on the resultant expression, in a context where the variable has the given value.

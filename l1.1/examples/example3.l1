@@ -16,5 +16,3 @@ impl<T> Homogeneous for Pair<T, T> {}
 
 #queryTrait [ Homogeneous for Pair<Num, Str> ]
 
-// Testing more complicated unification.
-

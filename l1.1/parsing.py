@@ -62,6 +62,7 @@ tag_rules = {
 untagged_rules = set([
 	"main",
 	"optionalElifStatements",
+	"optionalElseStatement",
 	"dataConstructorList",
 	"matchArms",
 	"optionalMatchConArgNameList",
@@ -116,7 +117,7 @@ class Visitor(antlr4.ParseTreeVisitor):
 						if name not in allowed_variadic:
 							assert len(tag_rules[name]) == len(children), "Bad lengths: %r %r" % (name, children)
 						else:
-							assert len(tag_rules[name]) >= len(children), "Bad lengths: %r %r" % (name, children)
+							assert len(tag_rules[name]) >= len(children), "Bad variadic lengths: %r %r" % (name, children)
 						yield Node(str(name), {
 							k: v for k, v in zip(tag_rules[name], children)
 						})

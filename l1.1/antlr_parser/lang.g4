@@ -50,6 +50,7 @@ codeBlock : statement * ;
 
 statement
 	: letStatement
+	| reassignmentStatement
 	| exprStatement
 	| ifStatement
 	| forStatement
@@ -57,7 +58,8 @@ statement
 	| returnStatement
 	;
 
-letStatement : 'let' ident optionalTypeAnnot '=' expr ';' ;
+letStatement : ident optionalTypeAnnot ':=' expr ';' ;
+reassignmentStatement : ident optionalTypeAnnot '=' expr ';' ;
 exprStatement : expr ';' ;
 
 ifStatement : 'if' expr '{' codeBlock '}' optionalElifStatements optionalElseStatement ;
@@ -86,6 +88,7 @@ nonAppExpr
 	| qualName
 	| lambdaExpr
 	| letExpr
+	| literalExpr
 	| '(' expr ')'
 	| '{' expr '}'
 	;
@@ -108,6 +111,18 @@ matchVariable : ident ;
 exprList : | expr ( ',' expr ) * ',' ? ;
 letExpr : 'let' ident optionalTypeAnnot '=' expr 'in' expr ;
 
+literalExpr
+	: litNum
+	| litString
+	;
+
+litNum : DIGIT + | DIGIT + '.' DIGIT * | '.' DIGIT + ;
+
+litString : '"' ( stringChar | escapeSequence ) * '"' ;
+ stringChar : ~( '\\' | '"' ) ;
+ escapeSequence : '\\' . ;
+// ['"a-zA-Z\\]
+
 qualName : ( ident '::' ) * ident ;
 ident : ID ;
 
@@ -119,7 +134,8 @@ traitQuery : '#queryTrait' '[' typeExpression 'for' typeExpression ']' ;
 
 // Terminal rules.
 
-ID : [a-zA-Z0-9_]+ ;
+ ID : [a-zA-Z0-9_]+ ;
+ DIGIT : [0-9] ;
 WS : [ \r\n\t]+ -> channel(HIDDEN) ;
 COMMENT : ( '//' ~[\r\n]* '\r'? '\n' ) -> skip ;
 BLOCKCOMMENT : '/*' .*? '*/' -> skip ;

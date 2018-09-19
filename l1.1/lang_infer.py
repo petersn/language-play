@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 import argparse
-import parser
+import parsing
 import inference
 import dependency
 
@@ -126,7 +126,7 @@ if __name__ == "__main__":
 	with open(args.source) as f:
 		source = f.read()
 
-	ast = parser.parse(source, kind="codeBlock")
+	ast = parsing.parse(source, kind="codeBlock")
 	prog_inf = ProgramInference()
 	prog_inf.infer_block(ast)
 

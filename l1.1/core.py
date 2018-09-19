@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 import enum
-import parser
+import parsing
 import inference
 import traits
 
@@ -19,7 +19,7 @@ def pretty_quantified_type_params(type_params):
 	),)
 
 def pretty_node(node):
-	assert isinstance(node, parser.Node)
+	assert isinstance(node, parsing.Node)
 	if node.name == "qualName":
 		return "::".join(node.contents)
 	elif node.name == "typeGeneric":
@@ -82,7 +82,7 @@ class Thing:
 		return self.parent.get_fully_qualified_name() + self.parent.name_connective + self.get_name()
 
 	def qualName_to_path(self, qualName):
-		assert isinstance(qualName, parser.Node)
+		assert isinstance(qualName, parsing.Node)
 		assert qualName.name == "qualName"
 		return qualName.contents
 
@@ -125,6 +125,8 @@ class Thing:
 	def print_special(self, depth=0):
 		pass
 
+# ========== Define data structures for the various AST elements =========
+
 class DataTypeBlock(Thing):
 	def construct(self, ast):
 		self.ast = ast
@@ -133,6 +135,7 @@ class DataTypeBlock(Thing):
 			DataConstructor(self, constructor)
 
 	def extract_for_trait_solving(self, extraction_context):
+		# TODO: Bounds and args not currently correctly filled in.
 		data_def = traits.DataDef(
 			name=self.get_name(), #self.get_fully_qualified_name(),
 			args=[],
@@ -151,6 +154,7 @@ class FunctionBlock(Thing):
 	def construct(self, ast):
 		self.ast = ast
 		self.insert_and_set_name(NameKind.VALUE, ast["name"])
+		self.code = CodeBlock(self, self.ast["code"])
 
 class TraitBlock(Thing):
 	def construct(self, ast):
@@ -159,6 +163,7 @@ class TraitBlock(Thing):
 		self.universe.add_definitions(self.ast["body"], self)
 
 	def extract_for_trait_solving(self, extraction_context):
+		# TODO: Bounds and args not currently correctly filled in.
 		trait_def = traits.TraitDef(
 			name=self.get_name(), #self.get_fully_qualified_name(),
 			args=[],
@@ -210,6 +215,10 @@ class LetBlock(Thing):
 	def construct(self, ast):
 		self.ast = ast
 		self.insert_and_set_name(NameKind.TYPE, ast["name"])
+
+class CodeBlock(Thing):
+	def construct(self, ast):
+		self.ast = ast
 
 class Namespace(Thing):
 	def construct(self, name, name_connective="::"):
@@ -335,7 +344,6 @@ class Universe:
 		print "Test type:", test_type
 		result = self.trait_solver.check(traits.SolverContext(), trait, test_type)
 		print "Query result:", result
-#		print "Trait check:", self.check_trait(trait, test_type)
 
 if __name__ == "__main__":
 	u = Universe()
