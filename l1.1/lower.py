@@ -34,11 +34,24 @@ class Lowerer:
 		self.top_level[ast["name"]] = datatype
 
 	def handle_traitDeclaration(self, code_block, ast):
-		print ast
-		not_handled(ast)
+		trait = core.Trait(ast["name"])
+		self.add_code_block(trait.code_block, ast["body"])
+		self.top_level[ast["name"]] = trait
 
 	def handle_implDeclaration(self, code_block, ast):
-		not_handled(ast)
+		trait_expr = self.lower_type(ast["trait"])
+		type_expr = self.lower_type(ast["forType"])
+		impl = core.Impl(trait_expr, type_expr)
+		self.add_code_block(impl.code_block, ast["body"])
+		self.top_level.impls.append(impl)
+
+	def handle_fnStub(self, code_block, ast):
+		fn_type = self.get_lambda_or_fn_type(ast)
+		code_block.add(core.Stub(ast["name"], fn_type))
+
+	def handle_parameterStub(self, code_block, ast):
+		type_expr = self.lower_type(ast["typeAnnot"])
+		code_block.add(core.Stub(ast["name"], type_expr))
 
 	def handle_fnDeclaration(self, code_block, ast):
 		entry = core.Declaration(
@@ -46,9 +59,6 @@ class Lowerer:
 			expr=self.lower_lambda_or_fn_ast(ast),
 		)
 		code_block.add(entry)
-
-	def handle_parameterStub(self, code_block, ast):
-		not_handled(ast)
 
 	def handle_letStatement(self, code_block, ast):
 		type_annotation = None
@@ -85,7 +95,6 @@ class Lowerer:
 		print "Query:", ast
 
 	def lower_expr(self, ast):
-		# TODO: Maybe reinsert the codeBlock nodes, so this is less ambiguous?
 		if ast.name == "codeBlock":
 			block = core.CodeBlock()
 			self.add_code_block(block, ast)
@@ -104,8 +113,7 @@ class Lowerer:
 			return self.lower_lambda_or_fn_ast(ast)
 		raise NotImplementedError("Not handled expr: %r" % (ast,))
 
-	def lower_lambda_or_fn_ast(self, ast):
-		func_expr = self.lower_expr(ast["result"])
+	def unpack_fn_types_helper(self, ast):
 		arg_names = []
 		arg_types = []
 		for arg_name, optional_arg_type in ast["args"]:
@@ -119,12 +127,25 @@ class Lowerer:
 		if ast["returnType"]:
 			x, = ast["returnType"]
 			return_type = self.lower_type(x)
+		return arg_names, arg_types, return_type
+
+	def lower_lambda_or_fn_ast(self, ast):
+		func_expr = self.lower_expr(ast["result"])
+		arg_names, arg_types, return_type = self.unpack_fn_types_helper(ast)
 		return core.AbsExpr(
 			arg_names,
 			arg_types,
 			func_expr,
 			return_type=return_type,
 		)
+
+	def get_lambda_or_fn_type(self, ast):
+		arg_names, arg_types, return_type = self.unpack_fn_types_helper(ast)
+		if any(i is None for i in arg_types):
+			raise ValueError("Cannot get explicit type of function without argument type annotations.")
+		if return_type is None:
+			raise ValueError("Cannot get explicit type of function without return type annotation.")
+		return core.AppType("fun", arg_types + [return_type])
 
 	def lower_type(self, ast):
 		if ast.name == "qualName":

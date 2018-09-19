@@ -27,6 +27,8 @@ class TopLevel:
 		return self.members[name]
 
 	def __setitem__(self, name, value):
+		if name in self.members:
+			raise ValueError("Duplicate definition of: %s" % (name,))
 		self.members[name] = value
 
 	def add(self, entry):
@@ -37,6 +39,10 @@ class TopLevel:
 		for member_name, member in self.members.iteritems():
 			with b.indent():
 				member.pretty(b)
+		print >>b, "Impls:"
+		for impl in self.impls:
+			with b.indent():
+				impl.pretty(b)
 		print >>b, "Root block:"
 		with b.indent():
 			self.root_block.pretty(b)
@@ -86,18 +92,35 @@ class DataType:
 class Trait:
 	def __init__(self, name):
 		self.name = name
+		self.code_block = CodeBlock()
 
 	def pretty(self, b):
-		print >>b, "Trait: %s" % (self.name,)
+		b.write("Trait: %s " % (self.name,))
+		with b.indent():
+			self.code_block.pretty(b)
+		b.write("\n")
 
 # ===== Impls
 
 class Impl:
-	def __init__(self, name):
-		self.name = name
+	def __init__(self, trait_expr, type_expr):
+		assert isinstance(trait_expr, TypeExpr) # XXX: Later maybe this is separate?
+		assert isinstance(type_expr, TypeExpr)
+		self.trait_expr = trait_expr
+		self.type_expr = type_expr
+		self.code_block = CodeBlock()
 
 	def pretty(self, b):
-		print >>b, "Impl: %s" (self.name,)
+		b.write("Impl: ")
+		with b.indent():
+			self.trait_expr.pretty(b)
+		b.write(" for ")
+		with b.indent():
+			self.type_expr.pretty(b)
+		b.write(" ")
+		with b.indent():
+			self.code_block.pretty(b)
+		b.write("\n")
 
 # ===== Imperative (CodeBlock-related) constructs
 
@@ -115,6 +138,18 @@ class CodeBlock:
 				entry.pretty(b)
 		b.write("}")
 
+class Stub:
+	def __init__(self, name, type_expr):
+		assert isinstance(name, str)
+		assert isinstance(type_expr, TypeExpr)
+		self.name = name
+		self.type_expr = type_expr
+
+	def pretty(self, b):
+		b.write("stub %s : " % (self.name,))
+		self.type_expr.pretty(b)
+		b.write("\n")
+
 class Declaration:
 	def __init__(self, name, expr, type_annotation=None):
 		assert isinstance(name, str)
@@ -130,8 +165,7 @@ class Declaration:
 			b.write(" : ")
 			self.type_annotation.pretty(b)
 		b.write(" := ")
-		with b.indent():
-			self.expr.pretty(b)
+		self.expr.pretty(b)
 		b.write("\n")
 
 class Reassignment:
