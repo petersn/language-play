@@ -2,9 +2,11 @@
 
 grammar lang;
 
-main : topLevelDef * ;
+codeBlock : statements ;
 
-topLevelDef
+statements : statement * ;
+
+statement
 	: dataDeclaration
 	| traitDeclaration
 	| implDeclaration
@@ -13,6 +15,12 @@ topLevelDef
 	| letStatement
 	| parameterStub
 	| query
+	| reassignmentStatement
+	| exprStatement
+	| ifStatement
+	| forStatement
+	| whileStatement
+	| returnStatement
 	;
 
 dataDeclaration : 'data' ident optionalTypeParameterList '{' dataConstructorList '}' ;
@@ -23,9 +31,9 @@ dataConstructorSpec : ident optionalTypeList ;
 optionalTypeList : | '(' typeExpression ( ',' typeExpression ) * ',' ? ')' ;
 optionalTypeParameterList : | '<' argSpec ( ',' argSpec ) * ',' ? '>' ;
 
-traitDeclaration : 'trait' ident optionalTypeParameterList '{' main '}' ;
+traitDeclaration : 'trait' ident optionalTypeParameterList '{' codeBlock '}' ;
 
-implDeclaration : 'impl' optionalTypeParameterList typeExpression 'for' typeExpression '{' main '}' ;
+implDeclaration : 'impl' optionalTypeParameterList typeExpression 'for' typeExpression '{' codeBlock '}' ;
 
 fnDeclaration : fnCore '{' codeBlock '}' ;
 fnStub : fnCore ';' ;
@@ -45,18 +53,6 @@ typeList : | typeExpression ( ',' typeExpression ) * ',' ? ;
 parameterStub : 'parameter' ident typeAnnotation ';' ;
 
 // Various definitions specific to imperative code and expressions.
-
-codeBlock : statement * ;
-
-statement
-	: letStatement
-	| reassignmentStatement
-	| exprStatement
-	| ifStatement
-	| forStatement
-	| whileStatement
-	| returnStatement
-	;
 
 letStatement : ident optionalTypeAnnot ':=' expr ';' ;
 reassignmentStatement : ident optionalTypeAnnot '=' expr ';' ;

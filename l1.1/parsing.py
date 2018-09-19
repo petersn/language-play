@@ -25,14 +25,15 @@ allowed_variadic = set([
 ])
 
 tag_rules = {
-	"topLevelDef": ["def"],
+	"codeBlock": ["statements"],
 	"letStatement": ["name", "optionalTypeAnnot", "expr"],
+	"reassignmentStatement": ["name", "optionalTypeAnnot", "expr"],
 	"exprStatement": ["expr"],
-	"ifStatement": ["expr", "body", "elifs", "else"],
-	"elifStatement": ["expr", "body"],
+	"ifStatement": ["condExpr", "body", "elifs", "else"],
+	"elifStatement": ["condExpr", "body"],
 	"elseStatement": ["body"],
 	"forStatement": ["name", "expr", "body"],
-	"whileStatement": ["expr", "body"],
+	"whileStatement": ["condExpr", "body"],
 	"breakStatement": [],
 	"continueStatement": [],
 	"returnStatement": ["optionalExpr"],
@@ -40,7 +41,7 @@ tag_rules = {
 	"dataConstructorSpec": ["name", "fields"],
 	"traitDeclaration": ["name", "typeParams", "body"],
 	"implDeclaration": ["quantifiedTypeParams", "trait", "forType", "body"],
-	"fnDeclaration": ["name", "typeParams", "args", "returnType", "code"],
+	"fnDeclaration": ["name", "typeParams", "args", "returnType", "result"],
 	"fnStub": ["name", "typeParams", "args", "returnType"],
 	"parameterStub": ["name", "typeAnnot"],
 	"appExpr": ["fn", "args"],
@@ -76,7 +77,7 @@ untagged_rules = set([
 	"optionalTypeAnnot",
 	"optionalReturnTypeAnnot",
 	"optionalExpr",
-	"codeBlock",
+	"statements",
 ])
 
 transparent_rules = set(langParser.langParser.ruleNames) - set(tag_rules) - untagged_rules
@@ -143,7 +144,7 @@ class Visitor(antlr4.ParseTreeVisitor):
 		# TODO: Remove str. For now suppress unicode like an evil person.
 		yield str(node.ID().symbol.text)
 
-def parse(s, kind="main"):
+def parse(s, kind="codeBlock"):
 	lexer = langLexer.langLexer(antlr4.InputStream(s))
 	stream = antlr4.CommonTokenStream(lexer)
 	parser = langParser.langParser(stream)

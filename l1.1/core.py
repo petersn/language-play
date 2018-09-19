@@ -12,7 +12,6 @@ A core translation unit consists of:
 		an (ordered) dict `members` mapping names to either `DataType`s or `Trait`s.
 		an (ordered) list `impls` of impls to test against for trait resolution.
 		a single `CodeBlock` containing all of the other definitions and functions.
-
 """
 
 import collections
@@ -29,6 +28,9 @@ class TopLevel:
 
 	def __setitem__(self, name, value):
 		self.members[name] = value
+
+	def add(self, entry):
+		self.root_block.add(entry)
 
 	def pretty(self, b):
 		print >>b, "Top level definitions:"
@@ -57,6 +59,10 @@ class DataType:
 
 	class DataConstructor:
 		def __init__(self, parent, name, fields):
+			assert isinstance(parent, DataType)
+			# TODO: Maybe relax this into any TypeExpr?
+#			assert all(isinstance(i, DataType) for i in fields)
+			assert all(isinstance(i, TypeExpr) for i in fields)
 			self.parent = parent
 			self.name = name
 			self.fields = fields
@@ -65,10 +71,17 @@ class DataType:
 			return "%s::%s" % (self.parent, self.name)
 
 		def pretty(self, b):
-			print >>b, "Constructor: %s(%s)" % (
-				self.name,
-				", ".join(map(str, self.fields)),
-			)
+			b.write("Constructor: %s(" % (self.name,))
+			for i, field in enumerate(self.fields):
+				with b.indent():
+					field.pretty(b)
+				if i != len(self.fields) - 1:
+					b.write(", ")
+			b.write(")\n")
+#			print >>b, "Constructor: %s(%s)" % (
+#				self.name,
+#				", ".join(map(str, self.fields)),
+#			)
 
 class Trait:
 	def __init__(self, name):
@@ -103,12 +116,20 @@ class CodeBlock:
 		b.write("}")
 
 class Declaration:
-	def __init__(self, name, expr):
+	def __init__(self, name, expr, type_annotation=None):
+		assert isinstance(name, str)
+		assert isinstance(expr, Expr)
+		assert type_annotation is None or isinstance(type_annotation, TypeExpr)
 		self.name = name
 		self.expr = expr
+		self.type_annotation = type_annotation
 
 	def pretty(self, b):
-		b.write("%s := " % (self.name,))
+		b.write(self.name)
+		if self.type_annotation != None:
+			b.write(" : ")
+			self.type_annotation.pretty(b)
+		b.write(" := ")
 		with b.indent():
 			self.expr.pretty(b)
 		b.write("\n")
@@ -140,6 +161,16 @@ class TypeConstraint:
 		b.write("\n")
 #		print >>b, "typecheck %s : %s" % (self.expr, self.type_expr)
 
+class ExprEvaluation:
+	def __init__(self, expr):
+		assert isinstance(expr, Expr)
+		self.expr = expr
+
+	def pretty(self, b):
+		b.write("eval ")
+		self.expr.pretty(b)
+		b.write("\n")
+
 # ===== Core expression language.
 
 class Expr:
@@ -160,28 +191,49 @@ class VarExpr(Expr):
 		b.write("%%%s" % (self.name,))
 
 class AppExpr(Expr):
-	def __init__(self, expr1, expr2):
-		self.expr1 = expr1
-		self.expr2 = expr2
+	def __init__(self, fn_expr, arg_exprs):
+		self.fn_expr = fn_expr
+		self.arg_exprs = arg_exprs
 
 	def pretty(self, b):
+		self.fn_expr.pretty(b)
 		b.write("(")
-		self.expr1.pretty(b)
-		b.write(" ")
-		self.expr2.pretty(b)
+		for i, arg_expr in enumerate(self.arg_exprs):
+			arg_expr.pretty(b)
+			if i != len(self.arg_exprs) - 1:
+				b.write(", ")
 		b.write(")")
 
 class AbsExpr(Expr):
-	def __init__(self, arg_names, expr):
+	def __init__(self, arg_names, arg_types, expr, return_type=None):
+		assert isinstance(expr, Expr)
+		assert all(i is None or isinstance(i, TypeExpr) for i in arg_types)
+		assert len(arg_names) == len(arg_types)
+		assert return_type is None or isinstance(return_type, TypeExpr)
 		self.arg_names = arg_names
+		self.arg_types = arg_types
 		self.expr = expr
+		self.return_type = return_type
 
 	def pretty(self, b):
-		b.write("\\%s -> " % (
-			", ".join(arg_name for arg_name in self.arg_names),
-		))
+		b.write("\\")
+		for i, (arg_name, arg_type) in enumerate(zip(self.arg_names, self.arg_types)):
+			b.write(arg_name)
+			if arg_type != None:
+				b.write(" : ")
+				with b.indent():
+					arg_type.pretty(b)
+			if i != len(self.arg_names) - 1:
+				b.write(", ")
+		b.write(" -> ")
+#		b.write("\\%s -> " % (
+#			", ".join(arg_name for arg_name in self.arg_names),
+#		))
 		with b.indent():
 			self.expr.pretty(b)
+		if self.return_type != None:
+			b.write(" : ")
+			self.return_type.pretty(b)
 
 #	def __str__(self):
 #		return "\%s -> %s" % (
@@ -230,6 +282,15 @@ class LoopExpr(Expr):
 		b.write("loop ")
 		self.expr.pretty(b)
 
+class ReturnExpr(Expr):
+	def __init__(self, expr):
+		self.expr = expr
+
+	def pretty(self, b):
+		b.write("return ")
+		self.expr.pretty(b)
+		b.write("\n")
+
 # ===== Core type expression language.
 
 class TypeExpr:
@@ -237,13 +298,15 @@ class TypeExpr:
 
 class AppType(TypeExpr):
 	def __init__(self, constructor, args):
-		assert isinstance(constructor, DataType.DataConstructor)
+#		assert isinstance(constructor, DataType.DataConstructor)
+		assert isinstance(constructor, str)
 		assert all(isinstance(i, TypeExpr) for i in args)
 		self.constructor = constructor
 		self.args = args
 
 	def pretty(self, b):
-		b.write(self.constructor.name)
+#		b.write(self.constructor.name)
+		b.write(self.constructor)
 		if self.args:
 			b.write("<")
 			with b.indent():
@@ -257,15 +320,15 @@ if __name__ == "__main__":
 	tl = TopLevel()
 	Nat = tl["Nat"] = DataType("Nat")
 	Nat.constructors["Z"] = DataType.DataConstructor(Nat, "Z", [])
-	Nat.constructors["S"] = DataType.DataConstructor(Nat, "S", [Nat])
+	Nat.constructors["S"] = DataType.DataConstructor(Nat, "S", [AppType("Nat", [])])
 
-	id_func = AbsExpr(["x"], VarExpr("x"))
+	id_func = AbsExpr(["x"], [None], VarExpr("x"))
 	tl.root_block.add(Declaration("id", id_func))
 
 	main_block = CodeBlock()
 	main_block.add(Declaration("id", id_func))
 	main_expr = BlockExpr(main_block)
-	main_func = AbsExpr(["x"], main_expr)
+	main_func = AbsExpr(["x"], [None], main_expr)
 	tl.root_block.add(Declaration("main", main_func))
 
 	b = utils.StringBuilder()
