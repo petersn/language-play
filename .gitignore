@@ -1,0 +1,19 @@
+# Ignore .swp files because I'm a filthy vim user.
+*.swp
+
+# Ignore all hidden files that begin with ._
+._*
+
+# Ignore compiled outputs.
+*.pyc
+*.o
+*.so
+
+# Ignore ANTLR4's outputs.
+l1.1/antlr_parser/lang.tokens
+l1.1/antlr_parser/langLexer.py
+l1.1/antlr_parser/langLexer.tokens
+l1.1/antlr_parser/langListener.py
+l1.1/antlr_parser/langParser.py
+l1.1/antlr_parser/langVisitor.py
+
