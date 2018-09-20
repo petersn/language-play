@@ -2,118 +2,26 @@
 
 import sys
 import UnionFind
-
-class HashableMixin:
-	def __eq__(self, other):
-		return self.key() == other.key()
-
-	def __hash__(self):
-		return hash(self.key())
-
-class MonoType(HashableMixin):
-	def __init__(self, kind, contents, link_name=None):
-		assert kind in ("link", "var")
-		self.kind = kind
-		self.contents = contents
-		self.link_name = link_name
-
-	def key(self):
-		return self.kind, tuple(self.contents), self.link_name
-
-	def __repr__(self):
-		if self.kind == "var":
-			return self.contents
-		else:
-			return "<%s%s>" % (
-				self.link_name,
-				"".join(" " + str(c) for c in self.contents),
-			)
-
-	def apply_type_subs(self, type_subs):
-		if self in type_subs:
-			return type_subs[self]
-		if self.kind == "link":
-			return MonoType(
-				self.kind,
-				[
-					c.apply_type_subs(type_subs)
-					for c in self.contents
-				],
-				link_name=self.link_name,
-			)
-		return self
-
-class PolyType(HashableMixin):
-	def __init__(self, binders, mono):
-		assert isinstance(binders, set)
-		assert all(isinstance(binder, MonoType) and binder.kind == "var" for binder in binders)
-		assert isinstance(mono, MonoType)
-		self.binders = binders
-		self.mono = mono
-
-	def key(self):
-		return frozenset(self.binders), self.mono
-
-	def __repr__(self):
-		return "(forall %s, %s)" % (
-			" ".join(str(i) for i in sorted(self.binders)),
-			self.mono,
-		)
-
-class Expr(HashableMixin):
-	def __init__(self, kind, contents):
-		assert kind in ("var", "app", "abs", "let")
-		self.kind = kind
-		self.contents = contents
-
-	def key(self):
-		return self.kind, tuple(self.contents)
-
-	def __repr__(self):
-		if self.kind == "var":
-			return "%s" % (self.contents,)
-		return "(%s%s)" % (
-			self.kind,
-			"".join(" " + str(c) for c in self.contents),
-		)
-
-def free_type_variables(x):
-	"""free_type_variables(x) -> set of variables (as MonoTypes with kind="var")
-
-	The argument x must either be a MonoType, PolyType, or list thereof.
-	Returns all free type variables in the argument.
-	"""
-	if isinstance(x, MonoType):
-		if x.kind == "var":
-			return set([x])
-		elif x.kind == "link":
-			return free_type_variables(x.contents)
-	elif isinstance(x, PolyType):
-		return free_type_variables(x.mono) - set(x.binders)
-	elif isinstance(x, list):
-		v = set()
-		for entry in x:
-			v |= free_type_variables(entry)
-		return v
-	print x
-	assert False
+import dependency
+import core
+import utils
 
 def alpha_canonicalize(t, subs=None):
+	assert isinstance(t, core.MonoType)
 	if subs is None:
 		subs = {}
-	if t.kind == "var":
+	if isinstance(t, core.VarType):
 		if t not in subs:
-			new_name = "t%s" % (str(len(subs) + 1),)
-			subs[t] = MonoType("var", new_name)
+			new_name = str(len(subs) + 1)
+			subs[t] = core.VarType(new_name)
 		return subs[t]
-	elif t.kind == "link":
-		return MonoType(
-			t.kind,
+	elif isinstance(t, core.AppType):
+		return core.AppType(
+			t.constructor,
 			[
 				alpha_canonicalize(arg, subs=subs)
-				for arg in t.contents
+				for arg in t.args
 			],
-			link_name=t.link_name,
 		)
 	raise NotImplementedError("Unhandled: %r" % (t,))
 
@@ -140,8 +48,8 @@ class UnificationContext:
 		Add the constraint that the t1 and t2 type expressions must be equal.
 		Critically, if either t1 or t2's current union sets contains a link then we recursively union the respective links.
 		"""
-		assert isinstance(t1, MonoType)
-		assert isinstance(t2, MonoType)
+		assert isinstance(t1, core.MonoType)
+		assert isinstance(t2, core.MonoType)
 #		print "Equating:", t1, t2
 		# TODO: Add occurs check!
 
@@ -151,15 +59,15 @@ class UnificationContext:
 		self.unions.union(t1, t2)
 		# If a term is a link then it becomes a union set link.
 		for t in (t1, t2):
-			if t.kind == "link":
+			if isinstance(t, core.AppType):
 				self.union_set_links[t] = t
 		# If both t1 and t2 have existing union set links then recursively unify them.
 		if t1 in self.union_set_links and t2 in self.union_set_links:
 			l1, l2 = self.union_set_links[t1], self.union_set_links[t2]
-			assert l1.kind == l2.kind == "link"
-			if len(l1.contents) != len(l2.contents) or l1.link_name != l2.link_name:
+			assert isinstance(l1, core.AppType) and isinstance(l2, core.AppType)
+			if len(l1.args) != len(l2.args) or l1.constructor != l2.constructor:
 				raise UnificationError("Cannot unify %r with %r" % (l1, l2))
-			for a, b in zip(l1.contents, l2.contents):
+			for a, b in zip(l1.args, l2.args):
 				self.equate(a, b)
 		# If at least one of the two has a union set link then store it as the new union set link for them both.
 		# We don't have to worry about which one we picked because we just recursively equated the two.
@@ -176,11 +84,10 @@ class UnificationContext:
 		if t in self.union_set_links:
 			t = self.union_set_links[t]
 		# Recursively make the type specific.
-		if t.kind == "link":
-			return MonoType(
-				"link",
-				[self.most_specific_type(x) for x in t.contents],
-				link_name=t.link_name,
+		if isinstance(t, core.AppType):
+			return core.AppType(
+				t.constructor,
+				[self.most_specific_type(x) for x in t.args],
 			)
 		return t
 
@@ -194,128 +101,130 @@ class Inference:
 
 		Takes every bound variable in poly_t, and assigns it a new type variable, and returns a new MonoType with the substitution applied.
 		"""
-		assert isinstance(poly_t, PolyType)
+		assert isinstance(poly_t, core.PolyType)
 		subst = {bound_variable: self.new_type() for bound_variable in poly_t.binders}
-		def replace(t):
-			if t.kind == "var":
-				return subst.get(t, t)
-			else:
-				return MonoType(
-					"link",
-					map(replace, t.contents),
-					link_name=t.link_name,
-				)
-		return replace(poly_t.mono)
+		return poly_t.mono.apply_type_subs(subst)
 
 	def new_type(self):
 		self.type_counter += 1
-		return MonoType("var", "t%i" % (self.type_counter,))
+		return core.VarType("%i" % (self.type_counter,))
 
 	def contextual_generalization(self, gamma, t):
 		"""contextual_generalization(gamma, t: MonoType) -> PolyType
 
 		Returns the generalization of t (a MonoType) as a PolyType, with every free variable of t not elsewhere used in the context gamma universally quantified.
 		"""
-		assert isinstance(t, MonoType)
-		return PolyType(
-			free_type_variables(t) - free_type_variables(gamma.values()),
+		assert isinstance(t, core.MonoType)
+		all_bound = set()
+		for poly_t in gamma.values():
+			all_bound |= poly_t.free_type_variables()
+		return core.PolyType(
+			t.free_type_variables() - all_bound,
 			t,
 		)
 
 	def J(self, gamma, expr, depth=0):
-#		print "  "*depth, "Inf:", expr
+#		print "  "*depth, "Inf:", expr, gamma
 		result = self._J(gamma, expr, depth=depth)
-#		print "  "*depth, "->", result, "=", expr
+#		print "  "*depth, "->", result, "for", expr
 		return result
 
 	def _J(self, gamma, expr, depth=0):
-		if expr.kind == "var":
+		if isinstance(expr, core.VarExpr):
 			if expr in gamma:
 				return self.inst(gamma[expr])
 			raise ValueError("Unknown variable: %r" % (expr,))
-		elif expr.kind == "app":
+		elif isinstance(expr, core.AppExpr):
 			# Get types for the two parts.
-			fn = expr.contents[0]
-			fn_type = self.J(gamma, fn, depth=depth+1)
-			args = expr.contents[1:]
-			arg_types = [self.J(gamma, arg, depth=depth+1) for arg in args]
+			fn_type = self.J(gamma, expr.fn_expr, depth=depth+1)
+			arg_types = [self.J(gamma, arg, depth=depth+1) for arg in expr.arg_exprs]
 			# Create a new type, and add an equation.
 			result_type = self.new_type()
-			self.unification_context.equate(fn_type, MonoType("link", arg_types + [result_type], link_name="fun"))
+			self.unification_context.equate(
+				fn_type,
+				core.AppType("fun", arg_types + [result_type]),
+			)
 			return result_type
-		elif expr.kind == "abs":
-			args = expr.contents[:-1]
-			result_expr = expr.contents[-1]
-			assert all(arg.kind == "var" for arg in args)
+		elif isinstance(expr, core.AbsExpr):
+			args = [core.VarExpr(arg_name) for arg_name in expr.arg_names]
 			# Do inference on the result expression, in a context where the argument has a fresh type.
 			arg_types = [self.new_type() for _ in args]
+			# TODO: XXX: Unify these with the type annotations from expr.arg_types!
 			gamma_prime = gamma.copy()
 			for arg, arg_type in zip(args, arg_types):
-				gamma_prime[arg] = PolyType(set(), arg_type)
-			result_type = self.J(gamma_prime, result_expr, depth=depth+1)
-			return MonoType("link", arg_types + [result_type], link_name="fun")
-		elif expr.kind == "let":
-			# TODO: Let polymorphism.
-			var, expr1, expr2 = expr.contents
-			assert var.kind == "var"
+				gamma_prime[arg] = core.PolyType(set(), arg_type)
+			result_type = self.J(gamma_prime, expr.result_expr, depth=depth+1)
+			# TODO: XXX: Unify this result type with the type annotation from expr.return_type!
+			return core.AppType("fun", arg_types + [result_type])
+		elif isinstance(expr, core.LetExpr):
+			var = core.VarExpr(expr.name)
 			# Do inference on the variable's expression.
-			var_t = self.J(gamma, expr1, depth=depth+1)
+			var_t = self.J(gamma, expr.expr1, depth=depth+1)
 			var_t = self.unification_context.most_specific_type(var_t)
 			# Contextually generalize the variable's type.
 			var_poly_t = self.contextual_generalization(gamma, var_t)
 			# Do inference on the resultant expression, in a context where the variable has the given value.
 			gamma_prime = gamma.copy()
 			gamma_prime[var] = var_poly_t
-			return self.J(gamma_prime, expr2, depth=depth+1)
+			return self.J(gamma_prime, expr.expr2, depth=depth+1)
 		raise NotImplementedError("Not handled: %r" % (expr,))
 
-if __name__ == "__main__":
-	a = MonoType("var", "a")
-	b = MonoType("var", "b")
-	c = MonoType("var", "c")
-	t_int = MonoType("link", [], link_name="int")
-	t_bool = MonoType("link", [], link_name="bool")
-	t1 = MonoType("link", [a, t_int], link_name="fun")
-
-	print t1
-
+def infer_code_block(code_block):
 	inf = Inference()
-	inf.unification_context.equate(a, c)
-	inf.unification_context.equate(b, t_bool)
-	inf.unification_context.equate(a, b)
 
-	print inf.unification_context.most_specific_type(c)
+	# Compute which names are provided by which declarations.
+	name_provided_by = {}
+	for decl in code_block.entries:
+		for name in decl.provided_names():
+			# TODO: Implement redefinition here later.
+			assert name not in name_provided_by, "Redefinition of %r" % (name,)
+			name_provided_by[name] = decl
 
-	e1 = Expr("let", [
-		Expr("var", "id"),
-		Expr("abs", [
-			Expr("var", "x"),
-			Expr("var", "x")
-		]),
-		Expr("var", "id")
-	])
+	# Compute dependencies within the block.
+	dep_manager = dependency.DependencyManager()
+	for decl in code_block.entries:
+		for name in decl.name_deps():
+			dep_manager.add_dep(decl, name_provided_by[name])
 
-	e5 = Expr("abs", [
-		Expr("var", "m"),
-		Expr("let", [
-			Expr("var", "y"),
-			Expr("var", "m"),
-			Expr("let", [
-				Expr("var", "x"),
-				Expr("app", [Expr("var", "y"), Expr("var", "flag")]),
-				Expr("var", "x")
-			])
-		])
-	])
+	# Compute an order to perform inference in.
+	strongly_connected_components = dep_manager.strongly_connected_components()
+	print "Strongly connected components:", strongly_connected_components
 
-	print "=== Doing inference."
+	# Initialize our context as empty.
+	gamma = {}
 
-	inf = Inference()
-	final_type = inf.J(
-		{
-			Expr("var", "flag"): PolyType(set(), MonoType("link", [], link_name="bool")),
-		},
-		e5,
-	)
-	print inf.unification_context.most_specific_type(final_type)
+	# Compute typing for each strongly connected component together.
+	for component in strongly_connected_components:
+		name_types = {}
+		print "=== Inference for component:", component
+
+		# Add fresh monotype variables to our system for the names declared in this component.
+		for decl in component:
+			for name in decl.provided_names():
+				new_type_var = name_types[name] = inf.new_type()
+				gamma[core.VarExpr(name)] = core.PolyType(set(), new_type_var)
+
+		# Apply inference, and add constraints on our monotype variables.
+		for decl in component:
+			if isinstance(decl, core.Declaration):
+				type_expr = inf.J(gamma, decl.expr)
+				inf.unification_context.equate(name_types[decl.name], type_expr)
+			else:
+				raise NotImplementedError("unhandled decl in inference: %r" % (decl,))
+
+		# Generalize the monotypes into polytypes, and update the context.
+		for decl in component:
+			if isinstance(decl, core.Declaration):
+				type_var = name_types[decl.name]
+				poly_type = inf.contextual_generalization(
+					gamma,
+					inf.unification_context.most_specific_type(type_var),
+				)
+				gamma[core.VarExpr(decl.name)] = poly_type
+				# Store the inferred type into the Declaration.
+				decl.type_annotation = poly_type
+			else:
+				raise NotImplementedError("unhandled decl in inference: %r" % (decl,))
+
+		print "Gamma:", gamma
 

@@ -3,7 +3,6 @@
 import enum, argparse
 import parsing
 import inference
-import traits
 import core
 import utils
 
@@ -57,18 +56,17 @@ class Lowerer:
 		entry = core.Declaration(
 			name=ast["name"],
 			expr=self.lower_lambda_or_fn_ast(ast),
+			# We set the declaration to have a hole type because all of our type information is already carried by the expr.
+			# Once inference occurs the type inference will propagate up to this hole.
+			type_annotation=core.PolyType(set(), HoleType()),
 		)
 		code_block.add(entry)
 
 	def handle_letStatement(self, code_block, ast):
-		type_annotation = None
-		if ast["optionalTypeAnnot"]:
-			x, = ast["optionalTypeAnnot"]
-			type_annotation = self.lower_type(x)
 		code_block.add(core.Declaration(
 			name=ast["name"],
 			expr=self.lower_expr(ast["expr"]),
-			type_annotation=type_annotation,
+			type_annotation=core.PolyType(set(), self.optional_annot_to_type(ast["optionalTypeAnnot"])),
 		))
 
 	def handle_reassignmentStatement(self, code_block, ast):
@@ -118,15 +116,8 @@ class Lowerer:
 		arg_types = []
 		for arg_name, optional_arg_type in ast["args"]:
 			arg_names.append(arg_name)
-			if optional_arg_type:
-				x, = optional_arg_type
-				arg_types.append(self.lower_type(x))
-			else:
-				arg_types.append(None)
-		return_type = None
-		if ast["returnType"]:
-			x, = ast["returnType"]
-			return_type = self.lower_type(x)
+			arg_types.append(self.optional_annot_to_type(optional_arg_type))
+		return_type = self.optional_annot_to_type(ast["returnType"])
 		return arg_names, arg_types, return_type
 
 	def lower_lambda_or_fn_ast(self, ast):
@@ -136,7 +127,7 @@ class Lowerer:
 			arg_names,
 			arg_types,
 			func_expr,
-			return_type=return_type,
+			return_type,
 		)
 
 	def get_lambda_or_fn_type(self, ast):
@@ -146,6 +137,13 @@ class Lowerer:
 		if return_type is None:
 			raise ValueError("Cannot get explicit type of function without return type annotation.")
 		return core.AppType("fun", arg_types + [return_type])
+
+	def optional_annot_to_type(self, optional_annot):
+		assert isinstance(optional_annot, list)
+		if optional_annot:
+			annot, = optional_annot
+			return self.lower_type(annot)
+		return core.HoleType()
 
 	def lower_type(self, ast):
 		if ast.name == "qualName":
@@ -173,7 +171,14 @@ if __name__ == "__main__":
 	lowerer = Lowerer()
 	lowerer.add_code_block(lowerer.top_level.root_block, ast)
 
-	b = utils.StringBuilder()
-	lowerer.top_level.pretty(b)
-	print b
+	print utils.pretty(lowerer.top_level)
+
+	print "=" * 20, "Doing inference."
+
+	# Do inference.
+	inference.infer_code_block(lowerer.top_level.root_block)
+
+	print "=" * 20, "Inference complete."
+
+	print utils.pretty(lowerer.top_level)
 

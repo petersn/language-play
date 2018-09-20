@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# encoding: utf-8
 """
 core.py
 
@@ -66,9 +67,9 @@ class DataType:
 	class DataConstructor:
 		def __init__(self, parent, name, fields):
 			assert isinstance(parent, DataType)
-			# TODO: Maybe relax this into any TypeExpr?
+			# TODO: Maybe relax this into any MonoType?
 #			assert all(isinstance(i, DataType) for i in fields)
-			assert all(isinstance(i, TypeExpr) for i in fields)
+			assert all(isinstance(i, MonoType) for i in fields)
 			self.parent = parent
 			self.name = name
 			self.fields = fields
@@ -104,8 +105,8 @@ class Trait:
 
 class Impl:
 	def __init__(self, trait_expr, type_expr):
-		assert isinstance(trait_expr, TypeExpr) # XXX: Later maybe this is separate?
-		assert isinstance(type_expr, TypeExpr)
+		assert isinstance(trait_expr, MonoType) # XXX: Later maybe this is separate?
+		assert isinstance(type_expr, MonoType)
 		self.trait_expr = trait_expr
 		self.type_expr = type_expr
 		self.code_block = CodeBlock()
@@ -128,9 +129,6 @@ class CodeBlock:
 	def __init__(self):
 		self.entries = []
 
-	def add(self, entry):
-		self.entries.append(entry)
-
 	def pretty(self, b):
 		b.write("{\n")
 		with b.indent():
@@ -138,10 +136,21 @@ class CodeBlock:
 				entry.pretty(b)
 		b.write("}")
 
-class Stub:
+	def add(self, entry):
+		assert isinstance(entry, CodeBlock.Entry)
+		self.entries.append(entry)
+
+	class Entry:
+		def provided_names(self):
+			return set()
+
+		def name_deps(self):
+			return set()
+
+class Stub(CodeBlock.Entry):
 	def __init__(self, name, type_expr):
 		assert isinstance(name, str)
-		assert isinstance(type_expr, TypeExpr)
+		assert isinstance(type_expr, MonoType)
 		self.name = name
 		self.type_expr = type_expr
 
@@ -150,25 +159,41 @@ class Stub:
 		self.type_expr.pretty(b)
 		b.write("\n")
 
-class Declaration:
-	def __init__(self, name, expr, type_annotation=None):
+	def provided_names(self):
+		return set([self.name])
+
+	def name_deps(self):
+		return self.type_expr.name_deps()
+
+class Declaration(CodeBlock.Entry):
+	def __init__(self, name, expr, type_annotation):
 		assert isinstance(name, str)
 		assert isinstance(expr, Expr)
-		assert type_annotation is None or isinstance(type_annotation, TypeExpr)
+		assert isinstance(type_annotation, PolyType)
 		self.name = name
 		self.expr = expr
 		self.type_annotation = type_annotation
 
+	def __repr__(self):
+		return "<Declaration %s>" % (self.name,)
+
 	def pretty(self, b):
 		b.write(self.name)
-		if self.type_annotation != None:
+#		if not isinstance(self.type_annotation, HoleType):
+		if True:
 			b.write(" : ")
 			self.type_annotation.pretty(b)
 		b.write(" := ")
 		self.expr.pretty(b)
 		b.write("\n")
 
-class Reassignment:
+	def provided_names(self):
+		return set([self.name])
+
+	def name_deps(self):
+		return self.expr.name_deps()
+
+class Reassignment(CodeBlock.Entry):
 	def __init__(self, name, expr):
 		self.name = name
 		self.expr = expr
@@ -179,10 +204,14 @@ class Reassignment:
 			self.expr.pretty(b)
 		b.write("\n")
 
-class TypeConstraint:
+	# Doesn't provide any names, because we just redefine one.
+#	def provided_names(self):
+#		return set([self.name])
+
+class TypeConstraint(CodeBlock.Entry):
 	def __init__(self, expr, type_expr):
 		assert isinstance(expr, Expr)
-		assert isinstance(type_expr, TypeExpr)
+		assert isinstance(type_expr, MonoType)
 		self.expr = expr
 		self.type_expr = type_expr
 
@@ -195,7 +224,7 @@ class TypeConstraint:
 		b.write("\n")
 #		print >>b, "typecheck %s : %s" % (self.expr, self.type_expr)
 
-class ExprEvaluation:
+class ExprEvaluation(CodeBlock.Entry):
 	def __init__(self, expr):
 		assert isinstance(expr, Expr)
 		self.expr = expr
@@ -207,27 +236,44 @@ class ExprEvaluation:
 
 # ===== Core expression language.
 
-class Expr:
-	pass
+class Expr(utils.HashableMixin):
+	# XXX: This is a little bad, because I maybe want to keep things more explicit.
+	def __repr__(self):
+		return str(utils.pretty(self))
 
 class BlockExpr(Expr):
 	def __init__(self, code_block):
 		self.code_block = code_block
 
+	def key(self):
+		raise NotImplementedError("Hashability isn't yet implemented for BlockExpr.")
+
 	def pretty(self, b):
 		self.code_block.pretty(b)
+
+	def name_deps(self):
+		return self.code_block.name_deps()
 
 class VarExpr(Expr):
 	def __init__(self, name):
 		self.name = name
 
+	def key(self):
+		return self.name
+
 	def pretty(self, b):
 		b.write("%%%s" % (self.name,))
+
+	def name_deps(self):
+		return set([self.name])
 
 class AppExpr(Expr):
 	def __init__(self, fn_expr, arg_exprs):
 		self.fn_expr = fn_expr
 		self.arg_exprs = arg_exprs
+
+	def key(self):
+		return self.fn_expr, tuple(self.arg_exprs)
 
 	def pretty(self, b):
 		self.fn_expr.pretty(b)
@@ -238,48 +284,54 @@ class AppExpr(Expr):
 				b.write(", ")
 		b.write(")")
 
+	def name_deps(self):
+		v = self.fn_expr.name_deps()
+		for arg in self.arg_exprs:
+			v |= arg.name_deps()
+		return v
+
 class AbsExpr(Expr):
-	def __init__(self, arg_names, arg_types, expr, return_type=None):
-		assert isinstance(expr, Expr)
-		assert all(i is None or isinstance(i, TypeExpr) for i in arg_types)
+	def __init__(self, arg_names, arg_types, result_expr, return_type):
+		assert all(isinstance(i, MonoType) for i in arg_types)
 		assert len(arg_names) == len(arg_types)
-		assert return_type is None or isinstance(return_type, TypeExpr)
+		assert isinstance(result_expr, Expr)
+		assert isinstance(return_type, MonoType)
 		self.arg_names = arg_names
 		self.arg_types = arg_types
-		self.expr = expr
+		self.result_expr = result_expr
 		self.return_type = return_type
+
+	def key(self):
+		return tuple(self.arg_names), tuple(self.arg_types), self.result_expr, self.return_type
 
 	def pretty(self, b):
 		b.write("\\")
 		for i, (arg_name, arg_type) in enumerate(zip(self.arg_names, self.arg_types)):
 			b.write(arg_name)
-			if arg_type != None:
+			if not isinstance(arg_type, HoleType):
 				b.write(" : ")
 				with b.indent():
 					arg_type.pretty(b)
 			if i != len(self.arg_names) - 1:
 				b.write(", ")
 		b.write(" -> ")
-#		b.write("\\%s -> " % (
-#			", ".join(arg_name for arg_name in self.arg_names),
-#		))
 		with b.indent():
-			self.expr.pretty(b)
-		if self.return_type != None:
+			self.result_expr.pretty(b)
+		if not isinstance(self.return_type, HoleType):
 			b.write(" : ")
 			self.return_type.pretty(b)
 
-#	def __str__(self):
-#		return "\%s -> %s" % (
-#			", ".join(arg_name for arg_name in self.arg_names),
-#			self.expr,
-#		)
+	def name_deps(self):
+		return self.result_expr.name_deps() - set(self.arg_names)
 
 class LetExpr(Expr):
 	def __init__(self, name, expr1, expr2):
 		self.name = name
 		self.expr1 = expr1
 		self.expr2 = expr2
+
+	def key(self):
+		return self.name, self.expr1, self.expr2
 
 	def pretty(self, b):
 		b.write("let %s := " % (self.name,))
@@ -288,11 +340,17 @@ class LetExpr(Expr):
 		b.write(" in\n")
 		self.expr2.pretty(b)
 
+	def name_deps(self):
+		return self.expr1.name_deps() | (self.expr2.name_deps() - set([self.name]))
+
 class IfExpr(Expr):
 	def __init__(self, cond_expr, true_expr, false_expr):
 		self.cond_expr = cond_expr
 		self.true_expr = true_expr
 		self.false_expr = false_expr
+
+	def key(self):
+		return self.cond_expr, self.true_expr, self.false_expr
 
 	def pretty(self, b):
 		b.write("if ")
@@ -305,38 +363,68 @@ class IfExpr(Expr):
 		with b.indent():
 			self.false_expr.pretty(b)
 
-#	def __str__(self):
-#		return "if %s then %s else %s" % (self.cond_expr, self.true_expr, self.false_expr)
+	def name_deps(self):
+		return self.cond_expr.name_deps() | self.true_expr.name_deps() | self.false_expr.name_deps()
 
 class LoopExpr(Expr):
 	def __init__(self, expr):
 		self.expr = expr
 
+	def key(self):
+		return self.expr
+
 	def pretty(self, b):
 		b.write("loop ")
 		self.expr.pretty(b)
 
+	def name_deps(self):
+		return self.expr.name_deps()
+
 class ReturnExpr(Expr):
 	def __init__(self, expr):
 		self.expr = expr
+
+	def key(self):
+		return self.expr
 
 	def pretty(self, b):
 		b.write("return ")
 		self.expr.pretty(b)
 		b.write("\n")
 
+	def name_deps(self):
+		return self.expr.name_deps()
+
 # ===== Core type expression language.
 
-class TypeExpr:
-	pass
+class MonoType(utils.HashableMixin):
+	# XXX: This is a little bad, because I maybe want to keep things more explicit.
+	def __repr__(self):
+		return str(utils.pretty(self))
 
-class AppType(TypeExpr):
+class HoleType(MonoType):
+	def key(self):
+		pass
+
+	def pretty(self, b):
+		b.write("_")
+
+	def free_type_variables(self):
+		return set()
+
+	def apply_type_subs(self, type_subs):
+		return self
+
+class AppType(MonoType):
 	def __init__(self, constructor, args):
 #		assert isinstance(constructor, DataType.DataConstructor)
 		assert isinstance(constructor, str)
-		assert all(isinstance(i, TypeExpr) for i in args)
+		assert all(isinstance(i, MonoType) for i in args)
 		self.constructor = constructor
 		self.args = args
+
+	def key(self):
+		return self.constructor, tuple(self.args)
 
 	def pretty(self, b):
 #		b.write(self.constructor.name)
@@ -350,20 +438,79 @@ class AppType(TypeExpr):
 						b.write(", ")
 			b.write(">")
 
+	def free_type_variables(self):
+		v = set()
+		for arg in self.args:
+			v |= arg.free_type_variables()
+		return v
+
+	def apply_type_subs(self, type_subs):
+		if self in type_subs:
+			return type_subs[self]
+		return AppType(
+			self.constructor,
+			[arg.apply_type_subs(type_subs) for arg in self.args],
+		)
+
+class VarType(MonoType):
+	def __init__(self, name):
+		assert isinstance(name, str)
+		self.name = name
+
+	def key(self):
+		return self.name
+
+	def pretty(self, b):
+		b.write("?%s" % (self.name,))
+
+	def free_type_variables(self):
+		return set([self])
+
+	def apply_type_subs(self, type_subs):
+		if self in type_subs:
+			return type_subs[self]
+		return self
+
+class PolyType(utils.HashableMixin):
+	def __init__(self, binders, mono):
+		assert isinstance(binders, set)
+		assert all(isinstance(binder, VarType) for binder in binders)
+		assert isinstance(mono, MonoType)
+		self.binders = binders
+		self.mono = mono
+
+	def __repr__(self):
+		return str(utils.pretty(self))
+
+	def key(self):
+		return frozenset(self.binders), self.mono
+
+	def pretty(self, b):
+		b.write("∀")
+		if self.binders:
+			for binder in sorted(self.binders):
+				b.write(" ")
+				binder.pretty(b)
+		b.write(", ")
+		self.mono.pretty(b)
+
+	def free_type_variables(self):
+		return self.mono.free_type_variables() - self.binders
+
 if __name__ == "__main__":
 	tl = TopLevel()
 	Nat = tl["Nat"] = DataType("Nat")
 	Nat.constructors["Z"] = DataType.DataConstructor(Nat, "Z", [])
 	Nat.constructors["S"] = DataType.DataConstructor(Nat, "S", [AppType("Nat", [])])
 
-	id_func = AbsExpr(["x"], [None], VarExpr("x"))
-	tl.root_block.add(Declaration("id", id_func))
+	id_func = AbsExpr(["x"], [HoleType()], VarExpr("x"), HoleType())
+	tl.root_block.add(Declaration("id", id_func, HoleType()))
 
 	main_block = CodeBlock()
-	main_block.add(Declaration("id", id_func))
+	main_block.add(Declaration("id", id_func, HoleType()))
 	main_expr = BlockExpr(main_block)
-	main_func = AbsExpr(["x"], [None], main_expr)
-	tl.root_block.add(Declaration("main", main_func))
+	main_func = AbsExpr(["x"], [HoleType()], main_expr, HoleType())
+	tl.root_block.add(Declaration("main", main_func, HoleType()))
 
 	b = utils.StringBuilder()
 	tl.pretty(b)

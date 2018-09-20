@@ -44,6 +44,7 @@ class StringBuilder:
 		self.indent_state = True
 
 	def write(self, s):
+		# TODO: Make this non-stupid with split.
 		for c in s:
 			if c != "\n":
 				self.write_no_newlines(c)
@@ -61,6 +62,18 @@ class StringBuilder:
 
 	def __str__(self):
 		return "".join(self.contents)
+
+def pretty(obj):
+	b = StringBuilder()
+	obj.pretty(b)
+	return b
+
+class HashableMixin:
+	def __eq__(self, other):
+		return self.__class__ is other.__class__ and self.key() == other.key()
+
+	def __hash__(self):
+		return hash(self.key())
 
 if __name__ == "__main__":
 	b = StringBuilder()
