@@ -90,3 +90,7 @@ extern "C" L11Obj* debug_apply(L11Obj* self, int arg_count, L11Obj** arguments) 
 	return self;
 }
 
+extern "C" void debug_print_num(int64_t x) {
+	std::cout << "Debug number: " << x << std::endl;
+}
+

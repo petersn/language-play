@@ -40,6 +40,8 @@ extern "C" void debug_free(void* ptr);
 extern "C" void debug_destructor(L11Obj* self);
 extern "C" L11Obj* debug_apply(L11Obj* self, int arg_count, L11Obj** arguments);
 
+extern "C" void debug_print_num(int64_t x);
+
 std::unordered_map<Kind, std::unique_ptr<KindTable>> global_kind_table;
 
 #endif

@@ -3,7 +3,8 @@
 import os, ctypes
 
 runtime_dir = os.path.dirname(os.path.realpath(__file__))
-dll = ctypes.CDLL(os.path.join(runtime_dir, "libruntime.so"))
+dll_path = os.path.join(runtime_dir, "libruntime.so")
+dll = ctypes.CDLL(dll_path)
 
 Kind = ctypes.c_ulong
 
@@ -36,6 +37,7 @@ desc = [
 	("debug_free", None, [ctypes.c_void_p]),
 	("debug_destructor", None, [L11ObjPtr]),
 	("debug_apply", None, [L11ObjPtr, ctypes.c_int, ctypes.POINTER(L11ObjPtr)]),
+	("debug_print_num", None, [ctypes.c_long]),
 ]
 
 for name, restype, argtypes in desc:
@@ -65,9 +67,9 @@ if __name__ == "__main__":
 	obj_dec_ref(returned_obj)
 
 	# Remove the last reference and therefore delete.
-	print "About to free."
-	debug_obj_summary(ptr)
-	obj_dec_ref(returned_obj)
+#	print "About to free."
+#	debug_obj_summary(ptr)
+#	obj_dec_ref(returned_obj)
 
-	l11_panic("Goodbye!")
+#	l11_panic("Goodbye!")
 
