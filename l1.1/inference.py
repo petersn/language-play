@@ -91,6 +91,45 @@ class UnificationContext:
 			)
 		return t
 
+# TODO: XXX: I'm not sure I like this...
+# The rationale is that CodeBlocks need a globally unique type variable to represent their return type.
+global_type_counter = 0
+def global_new_type():
+	global global_type_counter
+	global_type_counter += 1
+	return core.VarType(str(global_type_counter))
+
+class Gamma:
+	"""Gamma
+
+	Defines a typing context.
+	"""
+	def __init__(self):
+		self.context = {}
+		self.return_monotype = None
+
+	def __repr__(self):
+		return "%r (ret=%r)" % (self.context, self.return_monotype)
+
+	def __getitem__(self, key):
+		return self.context[key]
+
+	def __setitem__(self, key, value):
+		assert isinstance(key, core.VarExpr)
+		assert isinstance(value, core.PolyType)
+		self.context[key] = value
+
+	def __contains__(self, key):
+		assert isinstance(key, core.VarExpr)
+		return key in self.context
+
+	def copy(self):
+		"""copy() -> shallow copy of the context"""
+		new_gamma = Gamma()
+		new_gamma.context = self.context.copy()
+		new_gamma.return_monotype = self.return_monotype
+		return new_gamma
+
 class Inference:
 	def __init__(self):
 		self.unification_context = UnificationContext()
@@ -106,8 +145,10 @@ class Inference:
 		return poly_t.mono.apply_type_subs(subst)
 
 	def new_type(self):
-		self.type_counter += 1
-		return core.VarType("%i" % (self.type_counter,))
+		# TODO: XXX: For now...
+		return global_new_type()
+#		self.type_counter += 1
+#		return core.VarType("%i" % (self.type_counter,))
 
 	def contextual_generalization(self, gamma, t):
 		"""contextual_generalization(gamma, t: MonoType) -> PolyType
@@ -116,7 +157,7 @@ class Inference:
 		"""
 		assert isinstance(t, core.MonoType)
 		all_bound = set()
-		for poly_t in gamma.values():
+		for poly_t in gamma.context.values():
 			all_bound |= poly_t.free_type_variables()
 		return core.PolyType(
 			t.free_type_variables() - all_bound,
@@ -124,9 +165,9 @@ class Inference:
 		)
 
 	def J(self, gamma, expr, depth=0):
-#		print "  "*depth, "Inf:", expr, gamma
+		print "  "*depth, "Inf:", expr, gamma
 		result = self._J(gamma, expr, depth=depth)
-#		print "  "*depth, "->", result, "for", expr
+		print "  "*depth, "->", result, "for", expr
 		return result
 
 	def _J(self, gamma, expr, depth=0):
@@ -167,64 +208,88 @@ class Inference:
 			gamma_prime = gamma.copy()
 			gamma_prime[var] = var_poly_t
 			return self.J(gamma_prime, expr.expr2, depth=depth+1)
+		elif isinstance(expr, core.BlockExpr):
+			self.infer_code_block(gamma, expr.code_block, depth=depth+1)
+			# TODO: Extract the block's return type here.
+			return core.VarType("nil")
 		raise NotImplementedError("Not handled: %r" % (expr,))
 
-def infer_code_block(code_block):
-	inf = Inference()
+	def infer_code_block(self, gamma, code_block, depth=0):
+		gamma = gamma.copy()
 
-	# Compute which names are provided by which declarations.
-	name_provided_by = {}
-	for decl in code_block.entries:
-		for name in decl.provided_names():
-			# TODO: Implement redefinition here later.
-			assert name not in name_provided_by, "Redefinition of %r" % (name,)
-			name_provided_by[name] = decl
-
-	# Compute dependencies within the block.
-	dep_manager = dependency.DependencyManager()
-	for decl in code_block.entries:
-		for name in decl.name_deps():
-			dep_manager.add_dep(decl, name_provided_by[name])
-
-	# Compute an order to perform inference in.
-	strongly_connected_components = dep_manager.strongly_connected_components()
-	print "Strongly connected components:", strongly_connected_components
-
-	# Initialize our context as empty.
-	gamma = {}
-
-	# Compute typing for each strongly connected component together.
-	for component in strongly_connected_components:
-		name_types = {}
-		print "=== Inference for component:", component
-
-		# Add fresh monotype variables to our system for the names declared in this component.
-		for decl in component:
+		# Compute which names are provided by which declarations.
+		name_provided_by = {}
+		for decl in code_block.entries:
 			for name in decl.provided_names():
-				new_type_var = name_types[name] = inf.new_type()
-				gamma[core.VarExpr(name)] = core.PolyType(set(), new_type_var)
+				# TODO: Implement redefinition here later.
+				assert name not in name_provided_by, "Redefinition of %r" % (name,)
+				name_provided_by[name] = decl
 
-		# Apply inference, and add constraints on our monotype variables.
-		for decl in component:
-			if isinstance(decl, core.Declaration):
-				type_expr = inf.J(gamma, decl.expr)
-				inf.unification_context.equate(name_types[decl.name], type_expr)
-			else:
-				raise NotImplementedError("unhandled decl in inference: %r" % (decl,))
+		# Compute dependencies within the block.
+		dep_manager = dependency.DependencyManager()
+		for decl in code_block.entries:
+			for name in decl.name_deps():
+				if name in name_provided_by:
+					dep_manager.add_dep(decl, name_provided_by[name])
+				else:
+					print "FREE DEPENDENCY VARIABLE:", name
 
-		# Generalize the monotypes into polytypes, and update the context.
-		for decl in component:
-			if isinstance(decl, core.Declaration):
-				type_var = name_types[decl.name]
-				poly_type = inf.contextual_generalization(
-					gamma,
-					inf.unification_context.most_specific_type(type_var),
-				)
-				gamma[core.VarExpr(decl.name)] = poly_type
-				# Store the inferred type into the Declaration.
-				decl.type_annotation = poly_type
-			else:
-				raise NotImplementedError("unhandled decl in inference: %r" % (decl,))
+		# Compute an order to perform inference in.
+		strongly_connected_components = dep_manager.strongly_connected_components()
+		print "\nStrongly connected components:", strongly_connected_components
 
-		print "Gamma:", gamma
+		# Throw in every decl that wasn't included in any dep, and therefore isn't in any strongly connected component.
+		remaining_decls = set(code_block.entries)
+		for component in strongly_connected_components:
+			remaining_decls -= set(component)
+		print "Remaining:", remaining_decls
+
+		# It really doesn't matter how we throw these remaining decls in, but for now we just add each one as its own component at the end.
+		for decl in remaining_decls:
+			strongly_connected_components.append([decl])
+
+		print "Inference groups:", strongly_connected_components
+
+		# Compute typing for each strongly connected component together.
+		for component in strongly_connected_components:
+			name_types = {}
+			print "=== Inference for component:", component
+
+			# Add fresh monotype variables to our system for the names declared in this component.
+			for decl in component:
+				for name in decl.provided_names():
+					new_type_var = name_types[name] = self.new_type()
+					gamma[core.VarExpr(name)] = core.PolyType(set(), new_type_var)
+
+			# Apply inference, and add constraints on our monotype variables.
+			for decl in component:
+				if isinstance(decl, core.Declaration):
+					type_expr = self.J(gamma, decl.expr, depth=depth+1)
+					self.unification_context.equate(name_types[decl.name], type_expr)
+				elif isinstance(decl, core.ReturnStatement):
+					type_expr = self.J(gamma, decl.expr, depth=depth+1)
+					# TODO: XXX: Appropriately unify with a return type variable.
+#					self.unification_context.equate(code_block.return_type, type_expr)
+				else:
+					raise NotImplementedError("unhandled decl in inference: %r" % (decl,))
+
+			# Generalize the monotypes into polytypes, and update the context.
+			# We ignore a subset of the CodeBlock.Entry types, because they have no additional info to propagate.
+			ignored_types = (core.ReturnStatement,)
+			for decl in component:
+				if isinstance(decl, core.Declaration):
+					type_var = name_types[decl.name]
+					poly_type = self.contextual_generalization(
+						gamma,
+						self.unification_context.most_specific_type(type_var),
+					)
+					gamma[core.VarExpr(decl.name)] = poly_type
+					# Store the inferred type into the Declaration.
+					decl.type_annotation = poly_type
+				elif isinstance(decl, ignored_types):
+					pass
+				else:
+					raise NotImplementedError("unhandled decl in inference: %r" % (decl,))
+
+			print "Gamma:", gamma
 

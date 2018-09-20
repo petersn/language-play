@@ -58,7 +58,7 @@ class Lowerer:
 			expr=self.lower_lambda_or_fn_ast(ast),
 			# We set the declaration to have a hole type because all of our type information is already carried by the expr.
 			# Once inference occurs the type inference will propagate up to this hole.
-			type_annotation=core.PolyType(set(), HoleType()),
+			type_annotation=core.PolyType(set(), core.HoleType()),
 		)
 		code_block.add(entry)
 
@@ -85,9 +85,9 @@ class Lowerer:
 	def handle_returnStatement(self, code_block, ast):
 		if ast["optionalExpr"]:
 			expr, = ast["optionalExpr"]
-			return core.ReturnExpr(self.lower_expr(expr))
+			code_block.add(core.ReturnStatement(self.lower_expr(expr)))
 		else:
-			return core.ReturnExpr(core.VarExpr("nil"))
+			code_block.add(core.ReturnStatement(core.VarExpr("nil")))
 
 	def handle_query(self, code_block, ast):
 		print "Query:", ast
@@ -175,8 +175,13 @@ if __name__ == "__main__":
 
 	print "=" * 20, "Doing inference."
 
+	# Define a global typing context with an entry for nil.
+	root_gamma = inference.Gamma()
+	root_gamma[core.VarExpr("nil")] = core.PolyType(set(), core.AppType("nil", []))
+
 	# Do inference.
-	inference.infer_code_block(lowerer.top_level.root_block)
+	inf = inference.Inference()
+	inf.infer_code_block(root_gamma, lowerer.top_level.root_block)
 
 	print "=" * 20, "Inference complete."
 

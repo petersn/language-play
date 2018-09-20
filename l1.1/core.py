@@ -140,6 +140,16 @@ class CodeBlock:
 		assert isinstance(entry, CodeBlock.Entry)
 		self.entries.append(entry)
 
+	def name_deps(self):
+		# Although CodeBlocks aren't valid a CodeBlock.Entry, we still
+		# define name_deps for when we're nested inside a BlockExpr.
+		names = set()
+		for entry in self.entries:
+			names |= entry.name_deps()
+		for entry in self.entries:
+			names -= entry.provided_names()
+		return names
+
 	class Entry:
 		def provided_names(self):
 			return set()
@@ -233,6 +243,30 @@ class ExprEvaluation(CodeBlock.Entry):
 		b.write("eval ")
 		self.expr.pretty(b)
 		b.write("\n")
+
+class LoopStatement(CodeBlock.Entry):
+	def __init__(self, code_block):
+		self.code_block = code_block
+
+	def pretty(self, b):
+		b.write("loop ")
+		with b.indent():
+			self.code_block.pretty(b)
+
+	def name_deps(self):
+		return self.code_block.name_deps()
+
+class ReturnStatement(CodeBlock.Entry):
+	def __init__(self, expr):
+		self.expr = expr
+
+	def pretty(self, b):
+		b.write("return ")
+		self.expr.pretty(b)
+		b.write("\n")
+
+	def name_deps(self):
+		return self.expr.name_deps()
 
 # ===== Core expression language.
 
@@ -365,35 +399,6 @@ class IfExpr(Expr):
 
 	def name_deps(self):
 		return self.cond_expr.name_deps() | self.true_expr.name_deps() | self.false_expr.name_deps()
-
-class LoopExpr(Expr):
-	def __init__(self, expr):
-		self.expr = expr
-
-	def key(self):
-		return self.expr
-
-	def pretty(self, b):
-		b.write("loop ")
-		self.expr.pretty(b)
-
-	def name_deps(self):
-		return self.expr.name_deps()
-
-class ReturnExpr(Expr):
-	def __init__(self, expr):
-		self.expr = expr
-
-	def key(self):
-		return self.expr
-
-	def pretty(self, b):
-		b.write("return ")
-		self.expr.pretty(b)
-		b.write("\n")
-
-	def name_deps(self):
-		return self.expr.name_deps()
 
 # ===== Core type expression language.
 
