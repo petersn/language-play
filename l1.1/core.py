@@ -128,6 +128,7 @@ class Impl:
 class CodeBlock:
 	def __init__(self):
 		self.entries = []
+		self.return_monotype = None
 
 	def pretty(self, b):
 		b.write("{\n")

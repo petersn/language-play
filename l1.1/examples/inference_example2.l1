@@ -1,0 +1,9 @@
+
+fn test(arg) {
+	x := nil;
+	y := nil;
+	apply := |f| (f(x, y));
+	return apply(arg);
+	return x;
+}
+

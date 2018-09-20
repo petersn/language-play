@@ -99,11 +99,13 @@ def global_new_type():
 	global_type_counter += 1
 	return core.VarType(str(global_type_counter))
 
-class Gamma:
+class Gamma(object):
 	"""Gamma
 
 	Defines a typing context.
 	"""
+	__slots__ = "context", "return_monotype"
+
 	def __init__(self):
 		self.context = {}
 		self.return_monotype = None
@@ -211,11 +213,17 @@ class Inference:
 		elif isinstance(expr, core.BlockExpr):
 			self.infer_code_block(gamma, expr.code_block, depth=depth+1)
 			# TODO: Extract the block's return type here.
-			return core.VarType("nil")
+			# XXX: Is most_specific_type necessary here? Where *is* it necessary?
+			return self.unification_context.most_specific_type(expr.code_block.return_monotype)
+			#return core.AppType("nil", [])
 		raise NotImplementedError("Not handled: %r" % (expr,))
 
 	def infer_code_block(self, gamma, code_block, depth=0):
+		# Give the code block a new return type.
+		assert code_block.return_monotype == None
+		code_block.return_monotype = global_new_type()
 		gamma = gamma.copy()
+		gamma.return_monotype = code_block.return_monotype
 
 		# Compute which names are provided by which declarations.
 		name_provided_by = {}
@@ -232,6 +240,9 @@ class Inference:
 				if name in name_provided_by:
 					dep_manager.add_dep(decl, name_provided_by[name])
 				else:
+					# XXX: I'm still not really sure what the interpretation of this is.
+					# Maybe I should check that name is in gamma?
+					# If it isn't then this is probably an issue?
 					print "FREE DEPENDENCY VARIABLE:", name
 
 		# Compute an order to perform inference in.
@@ -269,7 +280,7 @@ class Inference:
 				elif isinstance(decl, core.ReturnStatement):
 					type_expr = self.J(gamma, decl.expr, depth=depth+1)
 					# TODO: XXX: Appropriately unify with a return type variable.
-#					self.unification_context.equate(code_block.return_type, type_expr)
+					self.unification_context.equate(gamma.return_monotype, type_expr)
 				else:
 					raise NotImplementedError("unhandled decl in inference: %r" % (decl,))
 
@@ -292,4 +303,7 @@ class Inference:
 					raise NotImplementedError("unhandled decl in inference: %r" % (decl,))
 
 			print "Gamma:", gamma
+
+		# Replace the return monotype with the most specific available.
+		code_block.return_monotype = self.unification_context.most_specific_type(code_block.return_monotype)
 
