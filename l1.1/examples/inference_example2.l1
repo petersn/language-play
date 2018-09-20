@@ -4,6 +4,6 @@ fn test(arg) {
 	y := nil;
 	apply := |f| (f(x, y));
 	return apply(arg);
-	return x;
+//	return x;
 }
 

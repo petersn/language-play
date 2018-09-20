@@ -176,8 +176,8 @@ if __name__ == "__main__":
 	print "=" * 20, "Doing inference."
 
 	# Define a global typing context with an entry for nil.
-	root_gamma = inference.Gamma()
-	root_gamma[core.VarExpr("nil")] = core.PolyType(set(), core.AppType("nil", []))
+	import prelude
+	root_gamma = prelude.make_gamma()
 
 	# Do inference.
 	inf = inference.Inference()

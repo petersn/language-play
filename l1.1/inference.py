@@ -167,9 +167,9 @@ class Inference:
 		)
 
 	def J(self, gamma, expr, depth=0):
-		print "  "*depth, "Inf:", expr, gamma
+#		print "  "*depth, "Inf:", expr, gamma
 		result = self._J(gamma, expr, depth=depth)
-		print "  "*depth, "->", result, "for", expr
+#		print "  "*depth, "->", result, "for", expr
 		return result
 
 	def _J(self, gamma, expr, depth=0):
@@ -243,28 +243,29 @@ class Inference:
 					# XXX: I'm still not really sure what the interpretation of this is.
 					# Maybe I should check that name is in gamma?
 					# If it isn't then this is probably an issue?
-					print "FREE DEPENDENCY VARIABLE:", name
+#					print "FREE DEPENDENCY VARIABLE:", name
+					pass
 
 		# Compute an order to perform inference in.
 		strongly_connected_components = dep_manager.strongly_connected_components()
-		print "\nStrongly connected components:", strongly_connected_components
+#		print "\nStrongly connected components:", strongly_connected_components
 
 		# Throw in every decl that wasn't included in any dep, and therefore isn't in any strongly connected component.
 		remaining_decls = set(code_block.entries)
 		for component in strongly_connected_components:
 			remaining_decls -= set(component)
-		print "Remaining:", remaining_decls
+#		print "Remaining:", remaining_decls
 
 		# It really doesn't matter how we throw these remaining decls in, but for now we just add each one as its own component at the end.
 		for decl in remaining_decls:
 			strongly_connected_components.append([decl])
 
-		print "Inference groups:", strongly_connected_components
+#		print "Inference groups:", strongly_connected_components
 
 		# Compute typing for each strongly connected component together.
 		for component in strongly_connected_components:
 			name_types = {}
-			print "=== Inference for component:", component
+#			print "=== Inference for component:", component
 
 			# Add fresh monotype variables to our system for the names declared in this component.
 			for decl in component:
@@ -302,7 +303,7 @@ class Inference:
 				else:
 					raise NotImplementedError("unhandled decl in inference: %r" % (decl,))
 
-			print "Gamma:", gamma
+#			print "Gamma:", gamma
 
 		# Replace the return monotype with the most specific available.
 		code_block.return_monotype = self.unification_context.most_specific_type(code_block.return_monotype)

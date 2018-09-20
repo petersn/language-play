@@ -503,6 +503,10 @@ class PolyType(utils.HashableMixin):
 	def free_type_variables(self):
 		return self.mono.free_type_variables() - self.binders
 
+	def is_concrete(self):
+		# We're concrete if our monotype has no free type variables, bound or not.
+		return self.mono.free_type_variables() == set()
+
 if __name__ == "__main__":
 	tl = TopLevel()
 	Nat = tl["Nat"] = DataType("Nat")

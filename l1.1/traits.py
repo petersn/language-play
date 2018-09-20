@@ -4,8 +4,9 @@ import copy
 import UnionFind
 import inference
 import core
+import utils
 
-class TraitExpr(inference.HashableMixin):
+class TraitExpr(utils.HashableMixin):
 	"""TraitExpr
 
 	Represents a trait, potentially with types in it that themselves have variables as holes.
@@ -14,7 +15,7 @@ class TraitExpr(inference.HashableMixin):
 	def __init__(self, base_trait, type_parameters):
 		assert isinstance(base_trait, TraitDef)
 		assert isinstance(type_parameters, list)
-		assert all(isinstance(i, inference.MonoType) for i in type_parameters)
+		assert all(isinstance(i, core.MonoType) for i in type_parameters)
 		self.base_trait = base_trait
 		self.type_parameters = type_parameters
 
@@ -33,9 +34,9 @@ class TraitExpr(inference.HashableMixin):
 			for type_param in self.type_parameters
 		])
 
-class TypeBound(inference.HashableMixin):
+class TypeBound(utils.HashableMixin):
 	def __init__(self, ty, trait):
-		assert isinstance(ty, inference.MonoType)
+		assert isinstance(ty, core.MonoType)
 		assert isinstance(trait, TraitExpr)
 		self.ty = ty
 		self.trait = trait
@@ -52,10 +53,10 @@ class TypeBound(inference.HashableMixin):
 			self.trait.apply_type_subs(type_subs),
 		)
 
-class BlockDef(inference.HashableMixin):
+class BlockDef(utils.HashableMixin):
 	def __init__(self, name, args, bounds, cookie=None):
 		assert isinstance(name, str)
-		assert all(isinstance(i, inference.MonoType) for i in args)
+		assert all(isinstance(i, core.MonoType) for i in args)
 		assert all(isinstance(i, TypeBound) for i in bounds)
 		self.name = name
 		self.args = args
@@ -81,10 +82,10 @@ class TraitDef(BlockDef):
 
 class Impl:
 	def __init__(self, quantified_args, bounds, trait_expr, type_expr, cookie=None):
-		assert all(isinstance(i, inference.MonoType) for i in quantified_args)
+		assert all(isinstance(i, core.MonoType) for i in quantified_args)
 		assert all(isinstance(i, TypeBound) for i in bounds)
 		assert isinstance(trait_expr, TraitExpr)
-		assert isinstance(type_expr, inference.MonoType)
+		assert isinstance(type_expr, core.MonoType)
 		self.quantified_args = quantified_args
 		self.bounds = bounds
 		self.trait_expr = trait_expr
@@ -92,7 +93,7 @@ class Impl:
 		self.cookie = cookie
 
 	def get_fresh(self, ctx):
-		"""get_fresh() -> ([TypeBound], TraitExpr, inference.MonoType)
+		"""get_fresh() -> ([TypeBound], TraitExpr, core.MonoType)
 		
 		Returns a tuple of:
 		1) A list of the type bounds, but with the substitution applied.
@@ -129,7 +130,7 @@ class SolverContext:
 
 	def new_type(self):
 		self.next_type_variable += 1
-		return inference.MonoType("var", "?" + str(self.next_type_variable))
+		return core.VarType(str(self.next_type_variable))
 
 class TraitSolver:
 	def __init__(self):
@@ -139,7 +140,7 @@ class TraitSolver:
 
 	def check(self, ctx, trait_expr, type_expr):
 		assert isinstance(trait_expr, TraitExpr)
-		assert isinstance(type_expr, inference.MonoType)
+		assert isinstance(type_expr, core.MonoType)
 		print "Checking %s for %s" % (trait_expr, type_expr)
 		for impl in self.impls:
 			print "  Testing:", impl
@@ -195,7 +196,7 @@ class TraitSolver:
 if __name__ == "__main__":
 	solver = TraitSolver()
 	# Define the builtin types.
-	X = inference.MonoType("var", "?X")
+	X = core.VarType("X")
 	Num = DataDef("Num", [], [])
 	Str = DataDef("Str", [], [])
 	Vec = DataDef("Vec", [X], [])
@@ -211,7 +212,7 @@ if __name__ == "__main__":
 		[],
 		[],
 		TraitExpr(Clone, []),
-		inference.MonoType("link", [], link_name="Num"),
+		core.AppType("Num", []),
 	))
 	solver.impls.append(Impl(
 		[X],
@@ -219,17 +220,17 @@ if __name__ == "__main__":
 			TypeBound(X, TraitExpr(Clone, [])),
 		],
 		TraitExpr(Clone, []),
-		inference.MonoType("link", [X], link_name="Vec")
+		core.AppType("Vec", [X])
 	))
 
 	ctx = SolverContext()
 	has_trait = solver.check(
 		ctx,
 		TraitExpr(Clone, []),
-#		inference.MonoType("link", [], link_name="Str"),
-		inference.MonoType("link", [
-			inference.MonoType("link", [], link_name="Num"),
-		], link_name="Vec"),
+#		core.AppType("Str", []),
+		core.AppType("Vec", [
+			core.AppType("Num", []),
+		]),
 	)
 	print "Result:", has_trait
 
