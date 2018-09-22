@@ -20,8 +20,8 @@ def populate():
 
 	@jitcore.snippet_maker
 	def int_add_snippet(seq, x, y):
-		seq(0, jitcore.KindAssertSnippet(jitcore.kind_table["int"]), x)
-		seq(0, jitcore.KindAssertSnippet(jitcore.kind_table["int"]), y)
+		x, = seq(1, jitcore.KindAssertSnippet(jitcore.kind_table["int"]), x)
+		y, = seq(1, jitcore.KindAssertSnippet(jitcore.kind_table["int"]), y)
 		x_value, = seq(1, jitcore.LoadOffsetSnippet(
 			jitcore.l11obj_header_size + 0,
 			jitcore.ValueType.UNBOXED_INT,

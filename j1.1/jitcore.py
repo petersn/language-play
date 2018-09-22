@@ -53,7 +53,7 @@ class Kind:
 		self.bytes_extra = bytes_extra
 		self.members = {}
 
-	def total_length_bytes(self):
+	def total_byte_length(self):
 		return l11obj_header_size + self.bytes_extra
 
 	def __getitem__(self, key):
@@ -130,7 +130,7 @@ class AssumptionContext:
 	def set_type(self, name, ty):
 		assert isinstance(name, str)
 		# Do not allow reassignment!
-		assert name not in self.name_to_type, "Reassignment isn't allowed!"
+#		assert name not in self.name_to_type, "Reassignment isn't allowed!"
 		self.name_to_type[name] = ty
 
 	def get_type(self, name):
@@ -165,9 +165,9 @@ class AssumptionContext:
 
 		Returns if the given name is known to be an L11Obj, and its Kind is known statically.
 		"""
-		assert self.is_L11Obj(name)
-		return name in self.name_to_kind
-#		return self.is_L11Obj(name) and name in self.name_to_kind
+#		assert self.is_L11Obj(name)
+#		return name in self.name_to_kind
+		return self.is_L11Obj(name) and name in self.name_to_kind
 
 	def has_concrete_value(self, name):
 		return name in self.name_to_value
@@ -255,7 +255,10 @@ class SequenceSnippet(Snippet):
 		for snippet, input_handles, output_handles in self.sequence:
 			input_vars = [variable_table[input_handle] for input_handle in input_handles]
 			output_vars = snippet.instantiate(dest, assumptions, input_vars)
-			assert len(output_handles) == len(output_vars)
+			if output_vars is None:
+				print "WARNING: Snippet in sequence returned None:", snippet
+				print "Did you forget to return outputs in your snippet?"
+			assert len(output_handles) == len(output_vars), "Handle mismatch: %r vs %r" % (output_handles, output_vars)
 			for output_handle, output_var in zip(output_handles, output_vars):
 				variable_table[output_handle] = output_var
 		# Return the appropriate variables.
@@ -283,13 +286,20 @@ class ApplySnippet(Snippet):
 		fn = inputs[0]
 		args = inputs[1:]
 		# Check if we know the type of the function.
-		if fn in assumptions:
-			fn_kind = assumptions[fn]
+		if assumptions.has_known_kind(fn):
+			fn_kind = assumptions.get_kind(fn)
 			if "apply" not in fn_kind:
 				raise ValueError("Kind %r statically has no apply!" % (fn_kind,))
 			return fn_kind["apply"].instantiate(dest, assumptions, inputs)
 		# If the input type is unknown then compile a totally generic runtime dispatch.
+		# 0) Force all of the inputs to be boxed.
+		fn, = ForceBoxSnippet().instantiate(dest, assumptions, [fn])
+		args = [
+			ForceBoxSnippet().instantiate(dest, assumptions, [arg])[0]
+			for arg in args
+		]
 		# 1) Allocate a temporary buffer to hold the arguments contiguously.
+
 		args_array = dest.new_tmp()
 		dest.add("\t{0} = alloca %L11Obj*, i32 {1}\n".format(args_array, len(args)))
 		# 2) Pack each argument into this buffer.
@@ -324,7 +334,7 @@ class AllocObjectSnippet(Snippet):
 	def instantiate(self, dest, assumptions, inputs):
 		assert not inputs
 		raw_ptr, result = dest.new_tmp(count=2)
-		dest.add("\t{0} = call i8* @malloc(i64 {1})\n".format(raw_ptr, self.kind.total_bytes_length()))
+		dest.add("\t{0} = call i8* @malloc(i64 {1})\n".format(raw_ptr, self.kind.total_byte_length()))
 		dest.add("\t{0} = bitcast i8* {1} to %L11Obj*\n".format(result, raw_ptr))
 		ref_count_ptr, kind_ptr = dest.new_tmp(count=2)
 		dest.add("\t{0} = getlementptr i64, %L11Obj* {1}, i32 0, i32 0\n".format(ref_count_ptr, result))
@@ -349,6 +359,7 @@ class StaticTypeAssertSnippet(Snippet):
 	def instantiate(self, dest, assumptions, inputs):
 		input_obj, = inputs
 		assert assumptions.get_type(input_obj) == self.ty, "Static type assert failure!"
+		return []
 
 class KindAssertSnippet(Snippet):
 	def __init__(self, kind):
@@ -357,21 +368,20 @@ class KindAssertSnippet(Snippet):
 
 	def instantiate(self, dest, assumptions, inputs):
 		input_obj, = inputs
+		boxed_obj, = ForceBoxSnippet().instantiate(dest, assumptions, [input_obj])
 		# Check if we already have a typing for the input.
-		if assumptions.has_known_kind(input_obj):
-			context_kind = assumptions[input_obj]
+		if assumptions.has_known_kind(boxed_obj):
+			context_kind = assumptions.get_kind(boxed_obj)
 			if self.kind == context_kind:
 				# We statically know that the type checking will pass!
-				return []
+				return [boxed_obj]
 			else:
 				# We statically know that the type checking will fail!
 				raise ValueError("Static type assert failure! %r != %r" % (self.kind, context_kind))
-		# TODO: XXX: Make sure we box up the object here.
-		assert assumptions.is_L11Obj(input_obj)
 		# If we don't have static type information then compile in a runtime check.
 		# 1) Get a pointer to the kind field.
 		ptr_tmp = dest.new_tmp()
-		dest.add("\t{0} = getelementptr i64*, %L11Obj* {1}, i32 0, i32 0\n".format(ptr_tmp, input_obj))
+		dest.add("\t{0} = getelementptr i64*, %L11Obj* {1}, i32 0, i32 0\n".format(ptr_tmp, boxed_obj))
 		# 2) Load the kind.
 		kind_tmp = dest.new_tmp()
 		dest.add("\t{0} = load i64, i64* {1}\n".format(kind_tmp, ptr_tmp))
@@ -393,8 +403,8 @@ class KindAssertSnippet(Snippet):
 		dest.add("\tret %L11Obj* undef\n")
 		dest.add("{0}:\n".format(good_label))
 		# Add the new typing knowledge to our context.
-		assumptions.set_kind(input_obj, self.kind)
-		return []
+		assumptions.set_kind(boxed_obj, self.kind)
+		return [boxed_obj]
 
 class FormatSnippet(Snippet):
 	def __init__(self, input_count, output_count, ir, tmps=0):
@@ -465,7 +475,7 @@ class StoreOffsetSnippet(Snippet, OffsetSnippetsDryer):
 		dest_obj, obj_to_store = inputs
 		# TODO: Think carefully about the safety and protocols we want here.
 		assert assumptions.is_L11Obj(dest_obj)
-		final_type, final_ptr = self.compute_field_pointer(dest, input_obj)
+		final_type, final_ptr = self.compute_field_pointer(dest, dest_obj)
 		dest.add("\tstore {0} {1}, {0}* {2}\n".format(
 			final_type, obj_to_store, final_ptr
 		))
