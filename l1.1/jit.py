@@ -202,7 +202,6 @@ if __name__ == "__main__":
 	fp = llvm.get_function("id")
 	print "Function pointer:", fp
 
-
 if __name__ == "__main__":
 	p = argparse.ArgumentParser()
 	p.add_argument("source")
