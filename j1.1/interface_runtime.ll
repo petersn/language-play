@@ -17,6 +17,7 @@ declare %L11Obj* @obj_method_call(%L11Obj*, i8*, i64, i32, %L11Obj**)
 declare void @l11_new_kind(i64)
 declare void @l11_kind_set_destructor(i64, void (%L11Obj*)*)
 declare void @l11_kind_set_member(i64, i8*, i64, %L11Obj*)
+declare %L11Obj* @l11_create_function_from_pointer(%L11Obj* (%L11Obj*, i32, %L11Obj**)*)
 declare void @l11_panic(i8*)
 
 declare void @debug_obj_summary(%L11Obj*)

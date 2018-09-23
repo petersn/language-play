@@ -3,6 +3,7 @@
 import utils
 import llvmlite.binding
 import jitcore
+import runtime
 
 class LLVM:
 	def __init__(self):
@@ -17,7 +18,8 @@ class LLVM:
 		self.prelude_ir += ir
 
 	def compile(self, ir, make_permanent=False):
-		mod = llvmlite.binding.parse_assembly(self.prelude_ir + ir)
+		ir = self.prelude_ir + ir
+		mod = llvmlite.binding.parse_assembly(ir)
 		mod.verify()
 		self.engine.add_module(mod)
 		self.engine.finalize_object()
@@ -56,7 +58,7 @@ class Function:
 		dest.add("\t%good_arg_count = icmp eq i32 %arg_count, {0}\n".format(self.arg_count))
 		dest.add("\tbr i1 %good_arg_count, label %GoodArgCount, label %BadArgCount\n")
 		dest.add("BadArgCount:\n")
-		error_ptr = dest.get_string_ptr("Bad argument count.")
+		error_ptr = dest.get_string_ptr("Bad argument count.\0")
 		dest.add("\tcall void @l11_panic(i8* {0})\n".format(error_ptr))
 		dest.add("\tunreachable\n")
 		dest.add("GoodArgCount:\n")
@@ -77,12 +79,36 @@ class Function:
 		result, = jitcore.ForceBoxSnippet().instantiate(dest, assumptions, [result])
 		dest.add("\tret %L11Obj* {0}\n".format(result))
 		dest.add("}\n")
-
+		# Produce the final IR.
 		ir = dest.format()
+#		print "FUNCTION IR:"
+#		print ir
 
-		with open("/tmp/demo.ll", "w") as out_f:
-			with open("interface_runtime.ll") as f:
-				out_f.write(f.read())
-			out_f.write(ir)
-			out_f.write("\n")
+		# Compile the module.
+		self.module_handle = jitcore.llvm.compile(ir)
+		self.function_pointer = jitcore.llvm.get_function(self.name)
+		self.function_l11obj = runtime.l11_create_function_from_pointer(self.function_pointer)
+
+class RawFunction:
+	def __init__(self, name, snippet, arg_count):
+		self.name = name
+		self.snippet = snippet
+		self.arg_count = arg_count
+
+	def compile(self):
+		dest = jitcore.IRDestination()
+		dest.add("define i64 @{0}() {{\n".format(self.name))
+		# Build the raw function.
+		assumptions = jitcore.AssumptionContext()
+		self.snippet.instantiate(dest, assumptions, [])
+		dest.add("\tret i64 -1\n")
+		dest.add("}\n")
+		# Produce the final IR.
+		ir = dest.format()
+		print "IR:"
+		print ir
+		# Compile the module.
+		self.module_handle = jitcore.llvm.compile(ir)
+		self.function_pointer = jitcore.llvm.get_function(self.name)
+		self.function_l11obj = runtime.l11_create_function_from_pointer(self.function_pointer)
 

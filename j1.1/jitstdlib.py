@@ -11,7 +11,7 @@ def make_trivial_unboxer_snippet(ty, kind):
 		# If the object is already an unboxed value of the right type then we noop.
 		if assumptions[x].get_type() == ty:
 			return x,
-		assert assumptions[x].is_L11Obj(), "Attempting to unbox something that is neither the right unboxed type nor a boxed value."
+		assert assumptions[x].is_l11obj(), "Attempting to unbox something that is neither the right unboxed type nor a boxed value."
 		# The object must be boxed, so let's assert the kind.
 		x, = jitcore.BoxedKindAssertSnippet(kind).instantiate(dest, assumptions, [x])
 		# Extract the field.
@@ -85,6 +85,7 @@ def populate_kinds():
 	])
 
 def populate_methods():
+	global force_unboxers
 	# Make unboxers.
 	force_unboxed_int_snippet = make_trivial_unboxer_snippet(
 		jitcore.ValueType.UNBOXED_INT,

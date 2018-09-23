@@ -29,8 +29,9 @@ desc = [
 	("obj_apply", L11ObjPtr, [L11ObjPtr, ctypes.c_int, ctypes.POINTER(L11ObjPtr)]),
 	("l11_new_kind", None, [Kind]),
 	("l11_kind_set_destructor", None, [Kind, destructor_type]),
-#	("l11_kind_set_apply", None, [Kind, apply_type]),
 	("l11_kind_set_member", None, [Kind, ctypes.c_char_p, ctypes.c_ulong, L11ObjPtr]),
+	# Here we claim a return of the parent class L11ObjPtr, even though it's actually always an L11Function*...
+	("l11_create_function_from_pointer", L11ObjPtr, [apply_type]),
 	("l11_panic", None, [ctypes.c_char_p]),
 	("debug_obj_summary", None, [L11ObjPtr]),
 	("debug_malloc", ctypes.c_void_p, [ctypes.c_ulong]),

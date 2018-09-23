@@ -133,7 +133,7 @@ class Info:
 		assert self.ty != ValueType.L11OBJ
 		self.value = value
 
-	def is_L11Obj(self):
+	def is_l11obj(self):
 		return self.ty == ValueType.L11OBJ
 
 	def has_known_kind(self):
@@ -329,10 +329,10 @@ class AllocObjectSnippet(Snippet):
 		dest.add("\t{0} = call i8* @malloc(i64 {1})\n".format(raw_ptr, self.kind.total_byte_length))
 		dest.add("\t{0} = bitcast i8* {1} to %L11Obj*\n".format(result, raw_ptr))
 		ref_count_ptr, kind_ptr = dest.new_tmp(count=2)
-		dest.add("\t{0} = getlementptr i64, %L11Obj* {1}, i32 0, i32 0\n".format(ref_count_ptr, result))
-		dest.add("\tstore i64* {0}, i64 1\n".format(ref_count_ptr))
-		dest.add("\t{0} = getlementptr i64, %L11Obj* {1}, i32 0, i32 0\n".format(kind_ptr, result))
-		dest.add("\tstore i64* {0}, i64 {1}\n".format(kind_ptr, self.kind.kind_number))
+		dest.add("\t{0} = getelementptr %L11Obj, %L11Obj* {1}, i32 0, i32 0\n".format(ref_count_ptr, result))
+		dest.add("\tstore i64 1, i64* {0}\n".format(ref_count_ptr))
+		dest.add("\t{0} = getelementptr %L11Obj, %L11Obj* {1}, i32 0, i32 1\n".format(kind_ptr, result))
+		dest.add("\tstore i64 {0}, i64* {1}\n".format(self.kind.kind_number, kind_ptr))
 		# Add our typing assumption.
 		assumptions[result].set_kind(self.kind)
 		return result,
@@ -374,13 +374,13 @@ class BoxedKindAssertSnippet(Snippet):
 		# If we don't have static type information then compile in a runtime check.
 		# 1) Get a pointer to the kind field.
 		ptr_tmp = dest.new_tmp()
-		dest.add("\t{0} = getelementptr i64*, %L11Obj* {1}, i32 0, i32 0\n".format(ptr_tmp, boxed_obj))
+		dest.add("\t{0} = getelementptr %L11Obj, %L11Obj* {1}, i32 0, i32 1\n".format(ptr_tmp, boxed_obj))
 		# 2) Load the kind.
 		kind_tmp = dest.new_tmp()
 		dest.add("\t{0} = load i64, i64* {1}\n".format(kind_tmp, ptr_tmp))
 		# 3) Compare the kind, and if it's not what we expected then crash.
 		flag_tmp = dest.new_tmp()
-		dest.add("\t{0} = icmp eq i64 {1}, i64 {2}\n".format(
+		dest.add("\t{0} = icmp eq i64 {1}, {2}\n".format(
 			flag_tmp, kind_tmp, self.kind.kind_number
 		))
 		# 4) Branch on failure.
@@ -390,7 +390,7 @@ class BoxedKindAssertSnippet(Snippet):
 			flag_tmp, good_label, bad_label
 		))
 		dest.add("{0}:\n".format(bad_label))
-		error_ptr = dest.get_string_ptr("Type error!")
+		error_ptr = dest.get_string_ptr("Type error!\0")
 		dest.add("\tcall void @l11_panic(i8* {0})\n".format(error_ptr))
 		# This is now dead code.
 		dest.add("\tunreachable\n")
@@ -448,10 +448,10 @@ class LoadSlotSnippet(Snippet, SlotSnippetsDryer):
 	def instantiate(self, dest, assumptions, inputs):
 		dest.add("; load offset %s %s %s\n" % (self.kind, self.slot_name, inputs))
 		input_obj, = inputs
-		assert assumptions[input_obj].is_L11Obj()
+		assert assumptions[input_obj].is_l11obj()
 		final_type, final_ptr = self.compute_field_pointer(dest, input_obj)
 		result = dest.new_tmp()
-		dest.add("\t{0} = load {1}* {2}\n".format(result, final_type, final_ptr))
+		dest.add("\t{0} = load {1}, {1}* {2}\n".format(result, final_type, final_ptr))
 		# Save the Info that we know about the field as now applying to our loaded value.
 		assumptions[result] = self.kind.slots[self.slot_name]["info"]
 		return result,
@@ -461,7 +461,7 @@ class StoreSlotSnippet(Snippet, SlotSnippetsDryer):
 		dest.add("; store offset %s %s %s\n" % (self.kind, self.slot_name, inputs))
 		dest_obj, obj_to_store = inputs
 		# TODO: Think carefully about the safety and protocols we want here.
-		assert assumptions[dest_obj].is_L11Obj()
+		assert assumptions[dest_obj].is_l11obj()
 		final_type, final_ptr = self.compute_field_pointer(dest, dest_obj)
 		dest.add("\tstore {0} {1}, {0}* {2}\n".format(
 			final_type, obj_to_store, final_ptr
@@ -473,7 +473,7 @@ class ForceBoxSnippet(Snippet):
 		dest.add("; force box %s\n" % (inputs,))
 		input_obj, = inputs
 		# If the object is known to already be boxed, then just return it unmodified.
-		if assumptions[input_obj].is_L11Obj():
+		if assumptions[input_obj].is_l11obj():
 			return input_obj,
 		# If the object is known to be unboxed then lookup a conversion.
 		value_type = assumptions[input_obj].get_type()

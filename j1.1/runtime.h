@@ -39,6 +39,7 @@ extern "C" L11Obj* obj_method_call(L11Obj* obj, const char* attribute_name, uint
 extern "C" void l11_new_kind(Kind new_kind);
 extern "C" void l11_kind_set_destructor(Kind kind, void (*destructor)(L11Obj* self));
 extern "C" void l11_kind_set_member(Kind kind, const char* attribute_name, uint64_t attribute_name_len, L11Obj* member);
+extern "C" L11Function* l11_create_function_from_pointer(L11Obj* (*native_code)(L11Function* self, int arg_count, L11Obj** arguments));
 extern "C" void l11_panic(const char* error_message);
 
 // Purely for debugging; I'll probably remove these.

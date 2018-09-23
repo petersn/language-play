@@ -47,8 +47,11 @@ extern "C" L11Obj* obj_apply(L11Obj* fn_obj, int arg_count, L11Obj** arguments) 
 }
 
 extern "C" L11Obj* obj_method_call(L11Obj* obj, const char* attribute_name, uint64_t attribute_name_len, int arg_count, L11Obj** arguments) {
+	std::cout << "Obj: " << obj << std::endl;
+	std::cout << "Kind: " << obj->kind << std::endl;
 	KindTable* kind_table = global_kind_table.at(obj->kind).get();
 	std::string attribute(attribute_name, attribute_name_len);
+	std::cout << "Calling " << attribute << " of " << obj << " with " << arg_count << " args." << std::endl;
 	L11Obj* method_obj = kind_table->member_table.at(attribute);
 	return obj_apply(method_obj, arg_count, arguments);
 }
@@ -73,6 +76,14 @@ extern "C" void l11_kind_set_member(Kind kind, const char* attribute_name, uint6
 		member
 	));
 	obj_inc_ref(member);
+}
+
+extern "C" L11Function* l11_create_function_from_pointer(L11Obj* (*native_code)(L11Function* self, int arg_count, L11Obj** arguments)) {
+	L11Function* function = new L11Function;
+	function->ref_count = 1;
+	function->kind = static_cast<Kind>(BuiltinKinds::KIND_FUNCTION);
+	function->native_code = native_code;
+	return function;
 }
 
 extern "C" void l11_panic(const char* error_message) {
