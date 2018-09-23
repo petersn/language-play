@@ -5,12 +5,10 @@ jit.py
 Basic JIT experimentation.
 """
 
-import os, argparse, pprint, enum, inspect
+import os, argparse, pprint, enum, inspect, collections
 import llvmlite.binding
 import runtime
 import jitstdlib
-
-l11obj_header_size = 8 + 8
 
 class LLVM:
 	def __init__(self):
@@ -47,14 +45,22 @@ class LLVM:
 			self.parent.engine.remove_module(self.mod)
 
 class Kind:
-	def __init__(self, name, kind_number, bytes_extra=0):
+	def __init__(self, name, kind_number):
 		self.name = name
 		self.kind_number = kind_number
-		self.bytes_extra = bytes_extra
 		self.members = {}
+		self.total_byte_length = 8 + 8 # ref_count: i64 and kind: i64
+		self.slots = collections.OrderedDict()
 
-	def total_byte_length(self):
-		return l11obj_header_size + self.bytes_extra
+	def add_slots(self, slots):
+		for desc in slots:
+			assert isinstance(desc["info"], Info)
+			self.slots[desc["name"]] = {
+				"llvm_type": desc["llvm_type"],
+				"info": desc["info"],
+				"offset": self.total_byte_length,
+			}
+			self.total_byte_length += desc["size"]
 
 	def __getitem__(self, key):
 		return self.members[key]
@@ -83,6 +89,7 @@ class KindTable:
 		kind_number = len(self.kind_table)
 		kind = self.kind_table[name] = Kind(name, kind_number)
 		runtime.l11_new_kind(kind_number)
+		return kind
 
 class ValueType(enum.Enum):
 	L11OBJ = 1
@@ -98,79 +105,78 @@ value_type_to_llvm_type = {
 # 2) If the type is L11OBJ then we have a "kind", which is a Kind.
 # 3) If the type is anything other than L11OBJ then we may or may not have an explicit compile-time value.
 # One day we'll allow compile-time values for L11OBJ, but for now I'm not dealing with that.
-# In terms of implications: A name being in either name_to_kind or name_to_value implies that the name is also in name_to_type.
-# Therefore, we use name_to_type as our authoritative reference for what identifiers are real.
+
+class Info:
+	"""Info
+
+	Represents statically known information about an LLVM variable.
+	"""
+	def __init__(self, ty, kind=None, value=None):
+		assert isinstance(ty, ValueType)
+		self.ty = ty
+
+		# Determine our kind (if applicable) and value (if applicable).
+		self.kind = self.value = None
+		# 1) If we're of a fixed non L11OBJ type then we have a kind that is statically determinable.
+		if self.ty != ValueType.L11OBJ:
+			assert kind is None, "Don't also set kind on an Info with type != ValueTypes.L11OBJ; let the inference be automatic."
+			# TODO: Maybe allow some ValueTypes other than L11OBJ to not be in boxify_kind_table?
+			# One could imagine a fat pointer with additional data?
+			self.kind = boxify_kind_table[self.ty]
+
+		if kind != None:
+			self.set_kind(kind)
+		if value != None:
+			self.set_value(value)
+
+	def __repr__(self):
+		return "<type=%r kind=%r value=%r>" % (self.ty, self.kind, self.value)
+
+	def get_type(self):
+		return self.ty
+
+	def get_kind(self):
+		assert self.kind != None
+		return self.kind
+
+	def set_kind(self, kind):
+		assert isinstance(kind, Kind)
+		# Only L11Objs can have a known kind set after initialization.
+		# The rationale for this is that any other ValueType should have its kind implied completely by boxify_kind_table.
+		assert self.ty == ValueType.L11OBJ
+		self.kind = kind
+
+	def get_value(self):
+		assert self.value != None
+		return self.value
+
+	def set_value(self, value):
+		# For now we can only have a known value if our type ISN'T ValueType.L11Obj.
+		assert self.ty != ValueType.L11OBJ
+		self.value = value
+
+	def is_L11Obj(self):
+		return self.ty == ValueType.L11OBJ
+
+	def has_known_kind(self):
+		return self.kind != None
+
 class AssumptionContext:
 	def __init__(self):
-		# Stores the type (a ValueType) for each name.
-		self.name_to_type = {}
-		# Stores the kind (a Kind) for each name that is of type ValueType.L11OBJ
-		self.name_to_kind = {}
-		# Stores an explicit compile-time value for each name that is of a type OTHER than ValueType.L11OBJ
-		self.name_to_value = {}
-		self.sanity_check()
+		self.gamma = {}
 
-	def sanity_check(self):
-		# Ensure name_to_type : Dict[str, ValueType]
-		for k, v in self.name_to_type.iteritems():
-			assert isinstance(k, str)
-			assert isinstance(v, ValueType)
-		# Ensure name_to_kind : Dict[str, Kind]
-		for k, v in self.name_to_kind.iteritems():
-			assert isinstance(k, str)
-			assert isinstance(v, Kind)
-			# Further assert that the key is also in name_to_type, and has type ValueType.L11OBJ.
-			assert self.name_to_type[k] == ValueType.L11OBJ
-		# Ensure name_to_value : Dict[str, object]
-		for k in self.name_to_value.iterkeys():
-			assert isinstance(k, str)
-			# Further assert that the key is also in name_to_type, and has a type OTHER than ValueType.L11OBJ
-			assert self.name_to_type[k] != ValueType.L11OBJ
-
-	def set_type(self, name, ty):
+	def __setitem__(self, name, info):
 		assert isinstance(name, str)
-		# Do not allow reassignment!
-#		assert name not in self.name_to_type, "Reassignment isn't allowed!"
-		self.name_to_type[name] = ty
+		assert isinstance(info, Info)
+		assert name not in self.gamma, "No reassignment of Info into a context allowed!"
+		self.gamma[name] = info
 
-	def get_type(self, name):
+	def __getitem__(self, name):
 		assert isinstance(name, str)
-		return self.name_to_type.get(name, ValueType.L11OBJ)
-
-	def set_kind(self, name, kind):
-		self.set_type(name, ValueType.L11OBJ)
-		self.name_to_kind[name] = kind
-
-	def get_kind(self, name):
-		"""get_kind(name: str) -> Kind
-
-		Gives the kind for a name whose type is ValueType.L11OBJ.
-		If the type is anything else then an exception is raised.
-		"""
-		assert self.get_type(name) == ValueType.L11OBJ, "Only L11Obj typed variables can have a kind!"
-		return self.name_to_kind[name]
-
-	def set_concrete_value(self, name, value):
-		assert self.get_type(name) != ValueType.L11OBJ, "L11Obj typed variables cannot have a concrete value!"
-		self.name_to_value[name] = value
-
-	def get_concrete_value(self, name):
-		return self.name_to_value[name]
-
-	def is_L11Obj(self, name):
-		return self.get_type(name) == ValueType.L11OBJ
-
-	def has_known_kind(self, name):
-		"""has_known_kind(name: str) -> bool
-
-		Returns if the given name is known to be an L11Obj, and its Kind is known statically.
-		"""
-#		assert self.is_L11Obj(name)
-#		return name in self.name_to_kind
-		return self.is_L11Obj(name) and name in self.name_to_kind
-
-	def has_concrete_value(self, name):
-		return name in self.name_to_value
+		# Implement the defaulting assumption.
+		if name not in self.gamma:
+			self[name] = Info(ValueType.L11OBJ)
+		return self.gamma[name]
 
 class IRDestination:
 	def __init__(self):
@@ -283,11 +289,13 @@ def snippet_maker(f):
 
 class ApplySnippet(Snippet):
 	def instantiate(self, dest, assumptions, inputs):
+		dest.add("; apply %s\n" % (inputs,))
 		fn = inputs[0]
 		args = inputs[1:]
 		# Check if we know the type of the function.
-		if assumptions.has_known_kind(fn):
-			fn_kind = assumptions.get_kind(fn)
+		dest.add("; fn info: %s\n" % (assumptions[fn],))
+		if assumptions[fn].has_known_kind():
+			fn_kind = assumptions[fn].get_kind()
 			if "apply" not in fn_kind:
 				raise ValueError("Kind %r statically has no apply!" % (fn_kind,))
 			return fn_kind["apply"].instantiate(dest, assumptions, inputs)
@@ -318,11 +326,13 @@ class ApplySnippet(Snippet):
 
 class IncRefSnippet(Snippet):
 	def instantiate(self, dest, assumptions, inputs):
+		dest.add("; inc ref %s\n" % (inputs,))
 		obj, = inputs
 		dest.add("\tcall void @obj_inc_ref(%L11Obj* {0})\n".format(obj))
 
 class DecRefSnippet(Snippet):
 	def instantiate(self, dest, assumptions, inputs):
+		dest.add("; dec ref %s\n" % (inputs,))
 		obj, = inputs
 		dest.add("\tcall void @obj_dec_ref(%L11Obj* {0})\n".format(obj))
 
@@ -332,9 +342,10 @@ class AllocObjectSnippet(Snippet):
 		self.kind = kind
 
 	def instantiate(self, dest, assumptions, inputs):
+		dest.add("; alloc %s\n" % (self.kind,))
 		assert not inputs
 		raw_ptr, result = dest.new_tmp(count=2)
-		dest.add("\t{0} = call i8* @malloc(i64 {1})\n".format(raw_ptr, self.kind.total_byte_length()))
+		dest.add("\t{0} = call i8* @malloc(i64 {1})\n".format(raw_ptr, self.kind.total_byte_length))
 		dest.add("\t{0} = bitcast i8* {1} to %L11Obj*\n".format(result, raw_ptr))
 		ref_count_ptr, kind_ptr = dest.new_tmp(count=2)
 		dest.add("\t{0} = getlementptr i64, %L11Obj* {1}, i32 0, i32 0\n".format(ref_count_ptr, result))
@@ -342,7 +353,7 @@ class AllocObjectSnippet(Snippet):
 		dest.add("\t{0} = getlementptr i64, %L11Obj* {1}, i32 0, i32 0\n".format(kind_ptr, result))
 		dest.add("\tstore i64* {0}, i64 {1}\n".format(kind_ptr, self.kind.kind_number))
 		# Add our typing assumption.
-		assumptions.set_kind(result, self.kind)
+		assumptions[result].set_kind(self.kind)
 		return result,
 
 class FunctionSnippet(Snippet):
@@ -358,23 +369,24 @@ class StaticTypeAssertSnippet(Snippet):
 
 	def instantiate(self, dest, assumptions, inputs):
 		input_obj, = inputs
-		assert assumptions.get_type(input_obj) == self.ty, "Static type assert failure!"
+		assert assumptions[input_obj].get_type() == self.ty, "Static type assert failure!"
 		return []
 
-class KindAssertSnippet(Snippet):
+class BoxedKindAssertSnippet(Snippet):
 	def __init__(self, kind):
 		assert isinstance(kind, Kind)
 		self.kind = kind
 
 	def instantiate(self, dest, assumptions, inputs):
+		dest.add("; kind assert %s %s\n" % (self.kind, inputs))
 		input_obj, = inputs
 		boxed_obj, = ForceBoxSnippet().instantiate(dest, assumptions, [input_obj])
 		# Check if we already have a typing for the input.
-		if assumptions.has_known_kind(boxed_obj):
-			context_kind = assumptions.get_kind(boxed_obj)
+		if assumptions[boxed_obj].has_known_kind():
+			context_kind = assumptions[boxed_obj].get_kind()
 			if self.kind == context_kind:
 				# We statically know that the type checking will pass!
-				return [boxed_obj]
+				return boxed_obj,
 			else:
 				# We statically know that the type checking will fail!
 				raise ValueError("Static type assert failure! %r != %r" % (self.kind, context_kind))
@@ -403,8 +415,8 @@ class KindAssertSnippet(Snippet):
 		dest.add("\tret %L11Obj* undef\n")
 		dest.add("{0}:\n".format(good_label))
 		# Add the new typing knowledge to our context.
-		assumptions.set_kind(boxed_obj, self.kind)
-		return [boxed_obj]
+		assumptions[boxed_obj].set_kind(self.kind)
+		return boxed_obj,
 
 class FormatSnippet(Snippet):
 	def __init__(self, input_count, output_count, ir, tmps=0):
@@ -433,48 +445,42 @@ class DebugSnippet(Snippet):
 		pprint.pprint(assumptions.gamma)
 		return []
 
-class OffsetSnippetsDryer:
-	def __init__(self, byte_offset, ty, kind=None):
-		assert isinstance(byte_offset, int)
-		assert isinstance(ty, ValueType)
-		self.byte_offset = byte_offset
-		self.ty = ty
+class SlotSnippetsDryer:
+	def __init__(self, kind, slot_name):
+		assert isinstance(kind, Kind)
+		assert slot_name in kind.slots
 		self.kind = kind
+		self.slot_name = slot_name
 
 	def compute_field_pointer(self, dest, obj):
-		final_type = value_type_to_llvm_type[self.ty]
+		slot_desc = self.kind.slots[self.slot_name]
+		final_type = slot_desc["llvm_type"]
 		byte_ptr, offset_byte_ptr, final_ptr = dest.new_tmp(count=3)
 		dest.add("\t{0} = bitcast %L11Obj* {1} to i8*\n".format(byte_ptr, obj))
-		dest.add("\t{0} = getelementptr i8, i8* {1}, i32 {2}\n".format(offset_byte_ptr, byte_ptr, self.byte_offset))
+		dest.add("\t{0} = getelementptr i8, i8* {1}, i32 {2}\n".format(
+			offset_byte_ptr, byte_ptr, slot_desc["offset"]
+		))
 		dest.add("\t{0} = bitcast i8* {1} to {2}*\n".format(final_ptr, offset_byte_ptr, final_type))
 		return final_type, final_ptr
 
-class LoadOffsetSnippet(Snippet, OffsetSnippetsDryer):
+class LoadSlotSnippet(Snippet, SlotSnippetsDryer):
 	def instantiate(self, dest, assumptions, inputs):
+		dest.add("; load offset %s %s %s\n" % (self.kind, self.slot_name, inputs))
 		input_obj, = inputs
-		assert assumptions.is_L11Obj(input_obj)
+		assert assumptions[input_obj].is_L11Obj()
 		final_type, final_ptr = self.compute_field_pointer(dest, input_obj)
 		result = dest.new_tmp()
 		dest.add("\t{0} = load {1}* {2}\n".format(result, final_type, final_ptr))
-		# XXX: If I clean up the set_kind/set_type thing then fix this up here.
-		if self.kind != None:
-			assumptions.set_kind(result, self.kind)
-		else:
-			assumptions.set_type(result, self.ty)
+		# Save the Info that we know about the field as now applying to our loaded value.
+		assumptions[result] = self.kind.slots[self.slot_name]["info"]
 		return result,
 
-class StoreOffsetSnippet(Snippet, OffsetSnippetsDryer):
-	def __init__(self, byte_offset, ty, kind=None):
-		assert isinstance(byte_offset, int)
-		assert isinstance(ty, ValueType)
-		self.byte_offset = byte_offset
-		self.ty = ty
-		self.kind = kind
-
+class StoreSlotSnippet(Snippet, SlotSnippetsDryer):
 	def instantiate(self, dest, assumptions, inputs):
+		dest.add("; store offset %s %s %s\n" % (self.kind, self.slot_name, inputs))
 		dest_obj, obj_to_store = inputs
 		# TODO: Think carefully about the safety and protocols we want here.
-		assert assumptions.is_L11Obj(dest_obj)
+		assert assumptions[dest_obj].is_L11Obj()
 		final_type, final_ptr = self.compute_field_pointer(dest, dest_obj)
 		dest.add("\tstore {0} {1}, {0}* {2}\n".format(
 			final_type, obj_to_store, final_ptr
@@ -483,16 +489,17 @@ class StoreOffsetSnippet(Snippet, OffsetSnippetsDryer):
 
 class ForceBoxSnippet(Snippet):
 	def instantiate(self, dest, assumptions, inputs):
+		dest.add("; force box %s\n" % (inputs,))
 		input_obj, = inputs
 		# If the object is known to already be boxed, then just return it unmodified.
-		if assumptions.is_L11Obj(input_obj):
-			return [input_obj]
+		if assumptions[input_obj].is_L11Obj():
+			return input_obj,
 		# If the object is known to be unboxed then lookup a conversion.
-		value_type = assumptions.get_type(input_obj)
+		value_type = assumptions[input_obj].get_type()
 		return boxify_table[value_type].instantiate(dest, assumptions, inputs)
 
 def initialize():
-	global llvm, kind_table, boxify_table
+	global llvm, kind_table, boxify_table, boxify_kind_table
 	llvmlite.binding.initialize()
 	llvmlite.binding.initialize_native_target()
 	llvmlite.binding.initialize_native_asmprinter()
@@ -505,7 +512,13 @@ def initialize():
 	llvm.add_to_prelude(prelude_ir)
 
 	kind_table = KindTable()
+
+	# Maps a ValueType other than ValueType.L11OBJ to a snippet that performs the boxing conversion.
 	boxify_table = {}
+
+	# Maps a ValueType other than ValueType.L11OBJ to a Kind that says what we know about the output of the boxing conversion.
+	# This must be the output Kind of the corresponding boxify_table snippet!
+	boxify_kind_table = {}
 
 	jitstdlib.populate()
 
