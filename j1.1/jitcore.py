@@ -68,6 +68,7 @@ class Kind:
 	def __setitem__(self, key, value):
 		assert isinstance(value, Snippet)
 		self.members[key] = value
+		print "ASSIGNING:", self.name, key, value
 
 	def __contains__(self, key):
 		return key in self.members
@@ -91,13 +92,16 @@ class KindTable:
 		runtime.l11_new_kind(kind_number)
 		return kind
 
+@enum.unique
 class ValueType(enum.Enum):
 	L11OBJ = 1
 	UNBOXED_INT = 2
+	UNBOXED_BOOL = 3
 
 value_type_to_llvm_type = {
 	ValueType.L11OBJ: "%L11Obj*",
 	ValueType.UNBOXED_INT: "i64",
+	ValueType.UNBOXED_BOOL: "i1",
 }
 
 # Our static knowledge about an identifier comes in three levels:
@@ -293,7 +297,7 @@ class ApplySnippet(Snippet):
 		fn = inputs[0]
 		args = inputs[1:]
 		# Check if we know the type of the function.
-		dest.add("; fn info: %s\n" % (assumptions[fn],))
+#		dest.add("; fn info: %s\n" % (assumptions[fn],))
 		if assumptions[fn].has_known_kind():
 			fn_kind = assumptions[fn].get_kind()
 			if "apply" not in fn_kind:
@@ -412,7 +416,7 @@ class BoxedKindAssertSnippet(Snippet):
 		error_ptr = dest.get_string_ptr("Type error!")
 		dest.add("\tcall void @l11_panic(i8* {0})\n".format(error_ptr))
 		# This is now dead code.
-		dest.add("\tret %L11Obj* undef\n")
+		dest.add("\tunreachable\n")
 		dest.add("{0}:\n".format(good_label))
 		# Add the new typing knowledge to our context.
 		assumptions[boxed_obj].set_kind(self.kind)
