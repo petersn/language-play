@@ -16,20 +16,28 @@ struct L11Obj {
 	Kind kind;
 };
 
+struct L11Function : public L11Obj {
+	L11Obj* (*native_code)(L11Function* self, int arg_count, L11Obj** arguments);
+};
+
 struct KindTable {
 	void (*destructor)(L11Obj* self);
-	L11Obj* (*apply)(L11Obj* self, int arg_count, L11Obj** arguments);
 	std::unordered_map<std::string, L11Obj*> member_table;
+};
+
+enum class BuiltinKinds {
+	KIND_NIL = 1,
+	KIND_FUNCTION = 2,
 };
 
 extern "C" void obj_dec_ref(L11Obj* obj);
 extern "C" void obj_inc_ref(L11Obj* obj);
 extern "C" L11Obj* obj_lookup(L11Obj* obj, const char* attribute_name, uint64_t attribute_name_len);
-extern "C" L11Obj* obj_apply(L11Obj* obj, int arg_count, L11Obj** arguments);
+extern "C" L11Obj* obj_apply(L11Obj* fn_obj, int arg_count, L11Obj** arguments);
+extern "C" L11Obj* obj_method_call(L11Obj* obj, const char* attribute_name, uint64_t attribute_name_len, int arg_count, L11Obj** arguments);
 
 extern "C" void l11_new_kind(Kind new_kind);
 extern "C" void l11_kind_set_destructor(Kind kind, void (*destructor)(L11Obj* self));
-extern "C" void l11_kind_set_apply(Kind kind, L11Obj* (*apply)(L11Obj* self, int arg_count, L11Obj** arguments));
 extern "C" void l11_kind_set_member(Kind kind, const char* attribute_name, uint64_t attribute_name_len, L11Obj* member);
 extern "C" void l11_panic(const char* error_message);
 

@@ -9,40 +9,7 @@ import os, argparse, pprint, enum, inspect, collections
 import llvmlite.binding
 import runtime
 import jitstdlib
-
-class LLVM:
-	def __init__(self):
-		self.target = llvmlite.binding.Target.from_default_triple()
-		self.target_machine = self.target.create_target_machine()
-		self.backing_mod = llvmlite.binding.parse_assembly("")
-		self.engine = llvmlite.binding.create_mcjit_compiler(self.backing_mod, self.target_machine)
-		self.permanent_module_handles = []
-		self.prelude_ir = ""
-
-	def add_to_prelude(self, ir):
-		self.prelude_ir += ir
-
-	def compile(self, ir, make_permanent=False):
-		mod = llvmlite.binding.parse_assembly(self.prelude_ir + ir)
-		mod.verify()
-		self.engine.add_module(mod)
-		self.engine.finalize_object()
-		self.engine.run_static_constructors()
-		module_handle = LLVM.ModuleHandle(self, mod)
-		if make_permanent:
-			self.permanent_module_handles.append(module_handle)
-		return module_handle
-
-	def get_function(self, name):
-		return self.engine.get_function_address(name)
-
-	class ModuleHandle:
-		def __init__(self, parent, mod):
-			self.parent = parent
-			self.mod = mod
-
-		def __del__(self):
-			self.parent.engine.remove_module(self.mod)
+import jitllvm
 
 class Kind:
 	def __init__(self, name, kind_number):
@@ -66,9 +33,9 @@ class Kind:
 		return self.members[key]
 
 	def __setitem__(self, key, value):
+#		assert isinstance(value, jitllvm.Function)
 		assert isinstance(value, Snippet)
 		self.members[key] = value
-		print "ASSIGNING:", self.name, key, value
 
 	def __contains__(self, key):
 		return key in self.members
@@ -79,6 +46,8 @@ class Kind:
 class KindTable:
 	def __init__(self):
 		self.kind_table = {}
+		# Start allocating user defined kinds at 1000, because <1000 is reserved for built-in kinds that need special runtime support.
+		self.kind_number_counter = 1000
 
 	def __getitem__(self, key):
 		return self.kind_table[key]
@@ -86,8 +55,10 @@ class KindTable:
 	def __contains__(self, key):
 		return key in self.kind_table
 
-	def new_kind(self, name):
-		kind_number = len(self.kind_table)
+	def new_kind(self, name, kind_number=None):
+		if kind_number is None:
+			self.kind_number_counter += 1
+			kind_number = self.kind_number_counter
 		kind = self.kind_table[name] = Kind(name, kind_number)
 		runtime.l11_new_kind(kind_number)
 		return kind
@@ -97,6 +68,7 @@ class ValueType(enum.Enum):
 	L11OBJ = 1
 	UNBOXED_INT = 2
 	UNBOXED_BOOL = 3
+	OPAQUE = 4
 
 value_type_to_llvm_type = {
 	ValueType.L11OBJ: "%L11Obj*",
@@ -126,7 +98,9 @@ class Info:
 			assert kind is None, "Don't also set kind on an Info with type != ValueTypes.L11OBJ; let the inference be automatic."
 			# TODO: Maybe allow some ValueTypes other than L11OBJ to not be in boxify_kind_table?
 			# One could imagine a fat pointer with additional data?
-			self.kind = boxify_kind_table[self.ty]
+			# EDIT: I'm now allowing exactly the above TODO provisionally, via the following if.
+			if self.ty in boxify_kind_table:
+				self.kind = boxify_kind_table[self.ty]
 
 		if kind != None:
 			self.set_kind(kind)
@@ -291,18 +265,21 @@ def snippet_maker(f):
 	seq.set_outputs(outputs)
 	return seq
 
-class ApplySnippet(Snippet):
+class MethodSnippet(Snippet):
+	def __init__(self, method_name):
+		self.method_name = method_name
+
 	def instantiate(self, dest, assumptions, inputs):
-		dest.add("; apply %s\n" % (inputs,))
+		dest.add("; method %s %s\n" % (self.method_name, inputs))
 		fn = inputs[0]
 		args = inputs[1:]
 		# Check if we know the type of the function.
 #		dest.add("; fn info: %s\n" % (assumptions[fn],))
 		if assumptions[fn].has_known_kind():
 			fn_kind = assumptions[fn].get_kind()
-			if "apply" not in fn_kind:
-				raise ValueError("Kind %r statically has no apply!" % (fn_kind,))
-			return fn_kind["apply"].instantiate(dest, assumptions, inputs)
+			if self.method_name not in fn_kind:
+				raise ValueError("Kind %r statically has no method %s!" % (fn_kind, self.method_name))
+			return fn_kind[self.method_name].instantiate(dest, assumptions, inputs)
 		# If the input type is unknown then compile a totally generic runtime dispatch.
 		# 0) Force all of the inputs to be boxed.
 		fn, = ForceBoxSnippet().instantiate(dest, assumptions, [fn])
@@ -311,7 +288,6 @@ class ApplySnippet(Snippet):
 			for arg in args
 		]
 		# 1) Allocate a temporary buffer to hold the arguments contiguously.
-
 		args_array = dest.new_tmp()
 		dest.add("\t{0} = alloca %L11Obj*, i32 {1}\n".format(args_array, len(args)))
 		# 2) Pack each argument into this buffer.
@@ -323,8 +299,9 @@ class ApplySnippet(Snippet):
 			dest.add("\tstore %L11Obj* {0}, %L11Obj** {1}\n".format(arg, arg_insert_ptr))
 		# 3) Do the call.
 		result = dest.new_tmp()
-		dest.add("\t{0} = call %L11Obj* @obj_apply(%L11Obj* {1}, i32 {2}, %L11Obj** {3})\n".format(
-			result, fn, len(args), args_array
+		method_name_str = dest.get_string_ptr(self.method_name)
+		dest.add("\t{0} = call %L11Obj* @obj_method_call(%L11Obj* {1}, i8* {2}, i64 {3}, i32 {4}, %L11Obj** {5})\n".format(
+			result, fn, method_name_str, len(self.method_name), len(args), args_array
 		))
 		return [result]
 
@@ -409,7 +386,7 @@ class BoxedKindAssertSnippet(Snippet):
 		# 4) Branch on failure.
 		good_label = dest.new_label()
 		bad_label = dest.new_label()
-		dest.add("\tbr i1 {0}, label {1}, label {2}\n".format(
+		dest.add("\tbr i1 {0}, label %{1}, label %{2}\n".format(
 			flag_tmp, good_label, bad_label
 		))
 		dest.add("{0}:\n".format(bad_label))
@@ -502,6 +479,10 @@ class ForceBoxSnippet(Snippet):
 		value_type = assumptions[input_obj].get_type()
 		return boxify_table[value_type].instantiate(dest, assumptions, inputs)
 
+class InlineKindCacheSnippet(Snippet):
+	def instantiate(self, dest, assumptions, inputs):
+		return []
+
 def initialize():
 	global llvm, kind_table, boxify_table, boxify_kind_table
 	llvmlite.binding.initialize()
@@ -509,7 +490,7 @@ def initialize():
 	llvmlite.binding.initialize_native_asmprinter()
 
 	# Load up the runtime interface.
-	llvm = LLVM()
+	llvm = jitllvm.LLVM()
 	llvmlite.binding.load_library_permanently(runtime.dll_path)
 	with open("interface_runtime.ll") as f:
 		prelude_ir = f.read()

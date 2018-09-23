@@ -8,5 +8,5 @@ libruntime.so: runtime.o Makefile
 
 .PHONY: clean
 clean:
-	rm -f libruntime.so *.o
+	rm -f libruntime.so *.o *.pyc
 

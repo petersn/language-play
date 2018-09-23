@@ -12,10 +12,10 @@ declare void @obj_dec_ref(%L11Obj*)
 declare void @obj_inc_ref(%L11Obj*)
 declare %L11Obj* @obj_lookup(%L11Obj*, i8*, i64)
 declare %L11Obj* @obj_apply(%L11Obj*, i32, %L11Obj**)
+declare %L11Obj* @obj_method_call(%L11Obj*, i8*, i64, i32, %L11Obj**)
 
 declare void @l11_new_kind(i64)
 declare void @l11_kind_set_destructor(i64, void (%L11Obj*)*)
-declare void @l11_kind_set_apply(i64, %L11Obj* (%L11Obj*, i32, %L11Obj**)*)
 declare void @l11_kind_set_member(i64, i8*, i64, %L11Obj*)
 declare void @l11_panic(i8*)
 

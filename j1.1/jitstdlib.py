@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import jitcore
+import jitllvm
 
 def make_trivial_unboxer_snippet(ty, kind):
 	@jitcore.FunctionSnippet
@@ -34,6 +35,20 @@ def make_trivial_operation_snippet(arity, unboxer_snippet, result_type, ir):
 	return operation_snippet
 
 def populate_kinds():
+	# First populate the built-in kinds.
+	jitcore.kind_table.new_kind("nil", kind_number=1)
+
+	jitcore.kind_table.new_kind("function", kind_number=2)
+	jitcore.kind_table["function"].add_slots([
+		{
+			"name": "contents",
+			"llvm_type": "%L11Obj* (%L11Obj*, i32, %L11Obj**)*",
+			"info": jitcore.Info(jitcore.ValueType.OPAQUE),
+			"size": 8,
+		},
+	])
+
+	# Add custom kinds.
 	jitcore.kind_table.new_kind("int")
 	jitcore.boxify_kind_table[jitcore.ValueType.UNBOXED_INT] = jitcore.kind_table["int"]
 	jitcore.kind_table["int"].add_slots([
@@ -53,6 +68,19 @@ def populate_kinds():
 			"llvm_type": "i1",
 			"info": jitcore.Info(jitcore.ValueType.UNBOXED_BOOL),
 			"size": 1,
+		},
+	])
+
+	jitcore.kind_table.new_kind("str")
+	jitcore.boxify_kind_table[jitcore.ValueType.UNBOXED_BOOL] = jitcore.kind_table["str"]
+	jitcore.kind_table["str"].add_slots([
+		# This is based off of sizeof(std::string) == 32, empirically.
+		# XXX: Very fragile! Fix this horrificness.
+		{
+			"name": "contents",
+			"llvm_type": "[32 x i8]",
+			"info": jitcore.Info(jitcore.ValueType.OPAQUE),
+			"size": 32,
 		},
 	])
 
@@ -84,13 +112,15 @@ def populate_methods():
 	}
 
 	operations = [
+#		("nil", "__str__",  2, jitcore.ValueType.UNBOXED_INT,  "\t{out0} = add i64 {in0}, {in1}\n"),
+
 		("int", "__add__",  2, jitcore.ValueType.UNBOXED_INT,  "\t{out0} = add i64 {in0}, {in1}\n"),
 		("int", "__sub__",  2, jitcore.ValueType.UNBOXED_INT,  "\t{out0} = sub i64 {in0}, {in1}\n"),
 		("int", "__mul__",  2, jitcore.ValueType.UNBOXED_INT,  "\t{out0} = mul i64 {in0}, {in1}\n"),
 		("int", "__div__",  2, jitcore.ValueType.UNBOXED_INT,  "\t{out0} = sdiv i64 {in0}, {in1}\n"),
 		("int", "__neg__",  1, jitcore.ValueType.UNBOXED_INT,  "\t{out0} = sub i64 0, {in0}\n"),
 		("int", "__bool__", 1, jitcore.ValueType.UNBOXED_BOOL, "\t{out0} = icmp ne i64 {in0}, i64 0\n"),
-		("int", "apply", 2, jitcore.ValueType.UNBOXED_INT, "\t{out0} = add i64 {in0}, {in1}\n"),
+		("int", "apply",    2, jitcore.ValueType.UNBOXED_INT, "\t{out0} = add i64 {in0}, {in1}\n"),
 
 		("bool", "__bool__", 1, jitcore.ValueType.UNBOXED_BOOL, "\t{out0} = bitcast i1 {in0} to i1 ; intentional noop\n"),
 	]
@@ -98,6 +128,7 @@ def populate_methods():
 	for kind_name, operation_name, arity, result_type, ir_template in operations:
 		unboxer = force_unboxers[kind_name]
 		operation_snippet = make_trivial_operation_snippet(arity, unboxer, result_type, ir_template)
+		function = jitllvm.Function(operation_name, operation_snippet, arity)
 		jitcore.kind_table[kind_name][operation_name] = operation_snippet
 
 def populate():

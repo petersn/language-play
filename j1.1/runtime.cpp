@@ -27,9 +27,30 @@ extern "C" L11Obj* obj_lookup(L11Obj* obj, const char* attribute_name, uint64_t 
 	return result_obj;
 }
 
-extern "C" L11Obj* obj_apply(L11Obj* obj, int arg_count, L11Obj** arguments) {
+extern "C" L11Obj* obj_apply(L11Obj* fn_obj, int arg_count, L11Obj** arguments) {
+	// If the object is a native function then call its code.
+	if (fn_obj->kind == static_cast<Kind>(BuiltinKinds::KIND_FUNCTION)) {
+		std::cout << "Native call." << std::endl;
+		L11Function* obj_as_function = static_cast<L11Function*>(fn_obj);
+		return obj_as_function->native_code(obj_as_function, arg_count, arguments);
+	}
+	// Otherwise, try to look up a __call__ and call it.
+	// This can result in an infinite loop, much like the behavior in Python 2 of:
+	//   class Foo:
+	//       def __init__(self):
+	//           self.__call__ = self
+	//   Foo()()
+	std::cout << "Dispatching to __call__." << std::endl;
+	KindTable* kind_table = global_kind_table.at(fn_obj->kind).get();
+	L11Obj* call_method = kind_table->member_table.at("__call__");
+	return obj_apply(call_method, arg_count, arguments);
+}
+
+extern "C" L11Obj* obj_method_call(L11Obj* obj, const char* attribute_name, uint64_t attribute_name_len, int arg_count, L11Obj** arguments) {
 	KindTable* kind_table = global_kind_table.at(obj->kind).get();
-	return kind_table->apply(obj, arg_count, arguments);
+	std::string attribute(attribute_name, attribute_name_len);
+	L11Obj* method_obj = kind_table->member_table.at(attribute);
+	return obj_apply(method_obj, arg_count, arguments);
 }
 
 extern "C" void l11_new_kind(Kind new_kind) {
@@ -42,11 +63,6 @@ extern "C" void l11_new_kind(Kind new_kind) {
 extern "C" void l11_kind_set_destructor(Kind kind, void (*destructor)(L11Obj* self)) {
 	KindTable* kind_table = global_kind_table.at(kind).get();
 	kind_table->destructor = destructor;
-}
-
-extern "C" void l11_kind_set_apply(Kind kind, L11Obj* (*apply)(L11Obj* self, int arg_count, L11Obj** arguments)) {
-	KindTable* kind_table = global_kind_table.at(kind).get();
-	kind_table->apply = apply;
 }
 
 extern "C" void l11_kind_set_member(Kind kind, const char* attribute_name, uint64_t attribute_name_len, L11Obj* member) {
