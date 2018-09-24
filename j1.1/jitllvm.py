@@ -40,10 +40,6 @@ class LLVM:
 		def __del__(self):
 			self.parent.engine.remove_module(self.mod)
 
-class Specialization:
-	def __init__(self, infos):
-		self.infos = infos
-
 class Function:
 	def __init__(self, name, snippet, arg_count):
 		self.name = name
@@ -81,8 +77,6 @@ class Function:
 		dest.add("}\n")
 		# Produce the final IR.
 		ir = dest.format()
-#		print "FUNCTION IR:"
-#		print ir
 
 		# Compile the module.
 		self.module_handle = jitcore.llvm.compile(ir)

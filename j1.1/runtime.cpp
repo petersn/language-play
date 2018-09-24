@@ -3,6 +3,8 @@
 #include <iostream>
 #include "runtime.h"
 
+L11Nil* global_nil = new L11Nil{};
+
 extern "C" void obj_dec_ref(L11Obj* obj) {
 	obj->ref_count--;
 	if (obj->ref_count <= 0) {
@@ -29,7 +31,7 @@ extern "C" L11Obj* obj_lookup(L11Obj* obj, const char* attribute_name, uint64_t 
 
 extern "C" L11Obj* obj_apply(L11Obj* fn_obj, int arg_count, L11Obj** arguments) {
 	// If the object is a native function then call its code.
-	if (fn_obj->kind == static_cast<Kind>(BuiltinKinds::KIND_FUNCTION)) {
+	if (fn_obj->kind == BuiltinKinds::KIND_FUNCTION) {
 		std::cout << "Native call." << std::endl;
 		L11Function* obj_as_function = static_cast<L11Function*>(fn_obj);
 		return obj_as_function->native_code(obj_as_function, arg_count, arguments);
@@ -81,7 +83,7 @@ extern "C" void l11_kind_set_member(Kind kind, const char* attribute_name, uint6
 extern "C" L11Function* l11_create_function_from_pointer(L11Obj* (*native_code)(L11Function* self, int arg_count, L11Obj** arguments)) {
 	L11Function* function = new L11Function;
 	function->ref_count = 1;
-	function->kind = static_cast<Kind>(BuiltinKinds::KIND_FUNCTION);
+	function->kind = BuiltinKinds::KIND_FUNCTION;
 	function->native_code = native_code;
 	return function;
 }

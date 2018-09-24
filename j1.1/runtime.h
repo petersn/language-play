@@ -10,10 +10,22 @@
 
 typedef uint64_t Kind;
 
+namespace BuiltinKinds {
+	enum {
+		KIND_NIL = 1,
+		KIND_FUNCTION = 2,
+	};
+}
+
 struct L11Obj {
 	// ref_count is signed to detect underflows without additional logic.
 	int64_t ref_count;
 	Kind kind;
+};
+
+// Define structs for all the built-in kinds.
+
+struct L11Nil : public L11Obj {
 };
 
 struct L11Function : public L11Obj {
@@ -23,11 +35,6 @@ struct L11Function : public L11Obj {
 struct KindTable {
 	void (*destructor)(L11Obj* self);
 	std::unordered_map<std::string, L11Obj*> member_table;
-};
-
-enum class BuiltinKinds {
-	KIND_NIL = 1,
-	KIND_FUNCTION = 2,
 };
 
 extern "C" void obj_dec_ref(L11Obj* obj);
@@ -51,6 +58,7 @@ extern "C" L11Obj* debug_apply(L11Obj* self, int arg_count, L11Obj** arguments);
 
 extern "C" void debug_print_num(int64_t x);
 
+extern L11Nil* global_nil;
 std::unordered_map<Kind, std::unique_ptr<KindTable>> global_kind_table;
 
 #endif
