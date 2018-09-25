@@ -492,7 +492,8 @@ def initialize():
 	# Load up the runtime interface.
 	llvm = jitllvm.LLVM()
 	llvmlite.binding.load_library_permanently(runtime.dll_path)
-	with open("interface_runtime.ll") as f:
+	jit_dir = os.path.dirname(os.path.realpath(__file__))
+	with open(os.path.join(jit_dir, "interface_runtime.ll")) as f:
 		prelude_ir = f.read()
 	llvm.add_to_prelude(prelude_ir)
 

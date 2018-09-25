@@ -72,7 +72,7 @@ continueStatement : 'continue' ';' ;
 returnStatement : 'return' optionalExpr ';' ;
 
 // ANTLR4 only handles left-recursive rules if they're all together as one rule, so we list everything left-recursive here.
-expr : appExpr | nonAppExpr ;
+expr : appExpr | nonAppExpr | methodCallExpr ;
 
 appExpr
 	: appExpr '(' exprList ')'
@@ -88,6 +88,8 @@ nonAppExpr
 	| '(' expr ')'
 	| '{' expr '}'
 	;
+
+methodCallExpr : (appExpr | nonAppExpr) '.' ident '(' exprList ')' ;
 
 optionalExpr : | expr ;
 
@@ -130,7 +132,7 @@ traitQuery : '#queryTrait' '[' typeExpression 'for' typeExpression ']' ;
 
 // Terminal rules.
 
- ID : [a-zA-Z0-9_]+ ;
+ ID : [a-zA-Z_][a-zA-Z0-9_]* ;
  DIGIT : [0-9] ;
 WS : [ \r\n\t]+ -> channel(HIDDEN) ;
 COMMENT : ( '//' ~[\r\n]* '\r'? '\n' ) -> skip ;

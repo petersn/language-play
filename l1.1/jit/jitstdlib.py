@@ -22,7 +22,7 @@ def make_trivial_unboxer_snippet(ty, kind):
 def make_trivial_operation_snippet(arity, unboxer_snippet, result_type, ir):
 	@jitcore.FunctionSnippet
 	def operation_snippet(dest, assumptions, inputs):
-		assert len(inputs) == arity, "Bad arity!"
+		assert len(inputs) == arity, "Bad arity: wanted %i got %r" % (arity, inputs)
 		# Unbox all the inputs.
 		unboxed_inputs = [
 			unboxer_snippet.instantiate(dest, assumptions, [arg])[0]
@@ -33,6 +33,16 @@ def make_trivial_operation_snippet(arity, unboxer_snippet, result_type, ir):
 		assumptions[result] = jitcore.Info(result_type)
 		return result,
 	return operation_snippet
+
+def make_int_snippet_factory(value):
+	assert isinstance(value, int)
+	@jitcore.FunctionSnippet
+	def snippet(dest, assumptions, inputs):
+		result = dest.new_tmp()
+		dest.add("\t{0} = add i64 0, {1}\n".format(result, value))
+		assumptions[result] = jitcore.Info(jitcore.ValueType.UNBOXED_INT)
+		return result,
+	return snippet
 
 def populate_kinds():
 	# First populate the built-in kinds.

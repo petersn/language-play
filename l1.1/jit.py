@@ -2,205 +2,91 @@
 """
 jit.py
 
-Contains logic for JITing core programs down into LLVM IR.
+Contains logic for JITing core programs down into jitcore.Snippets, which in turn produce IR.
 """
 
 import os, argparse
-import llvmlite.binding
-
 import parsing
 import core
 import inference
 import prelude
 import lower
 import utils
-from runtime import runtime
+from jit import jitcore
+from jit import jitstdlib
+from jit import jitllvm
+from jit import runtime
 
-llvmlite.binding.initialize()
-llvmlite.binding.initialize_native_target()
-llvmlite.binding.initialize_native_asmprinter()
+class AbstractionJIT:
+	def __init__(self, abs_expr):
+		assert isinstance(abs_expr, core.AbsExpr)
+		self.names = {}
+		argument_count = len(abs_expr.arg_names)
+		self.seq = jitcore.SequenceSnippet(argument_count)
+		for arg_name, handle in zip(abs_expr.arg_names, self.seq.get_inputs()):
+			self.names[arg_name] = handle
+		result = self.build(abs_expr.result_expr)
+		self.seq.set_outputs([result])
 
-class LLVM:
-	def __init__(self):
-		self.target = llvmlite.binding.Target.from_default_triple()
-		self.target_machine = self.target.create_target_machine()
-		self.backing_mod = llvmlite.binding.parse_assembly("")
-		self.engine = llvmlite.binding.create_mcjit_compiler(self.backing_mod, self.target_machine)
-		self.permanent_module_handles = []
-		self.prelude_ir = ""
+	def build_literal(self, literal):
+		if isinstance(literal, int):
+			result, = self.seq(1, jitstdlib.make_int_snippet_factory(literal))
+			return result
+		raise NotImplementedError("Unhandled literal: %r" % (literal,))
 
-	def add_to_prelude(self, ir):
-		self.prelude_ir += ir
+	def build(self, expr):
+		if isinstance(expr, core.BlockExpr):
+			return self.build(expr.code_block)
+		elif isinstance(expr, core.CodeBlock):
+			for entry in expr.entries:
+				result = self.build(entry)
+			return result
+		elif isinstance(expr, core.Declaration):
+			result = self.names[expr.name] = self.build(expr.expr)
+			return result
+		elif isinstance(expr, core.ReturnStatement):
+			result = self.build(expr.expr)
+			# TODO: Think carefully about a more type aware thing to do here.
+			boxed_result, = self.seq(1, jitcore.ForceBoxSnippet(), result)
+			self.seq(0, jitcore.FormatSnippet(1, 0, "\tret %L11Obj* {in0}\n"), boxed_result)
+			# XXX: Is this the right return value? Is there any?
+			# Control flow is hard. :/
+			return boxed_result
+		elif isinstance(expr, core.VarExpr):
+			return self.names[expr.name]
+		elif isinstance(expr, core.LiteralExpr):
+			return self.build_literal(expr.literal)
+		elif isinstance(expr, core.MethodCallExpr):
+			obj = self.build(expr.fn_expr)
+			args = [self.build(arg) for arg in expr.arg_exprs]
+			result, = self.seq(1, jitcore.MethodSnippet(expr.method_name), obj, *args)
+			return result
+		raise NotImplementedError("Don't know how to JIT: %r" % (expr.__class__,))
 
-	def compile(self, ir, make_permanent=False):
-		mod = llvmlite.binding.parse_assembly(self.prelude_ir + ir)
-		mod.verify()
-		self.engine.add_module(mod)
-		self.engine.finalize_object()
-		self.engine.run_static_constructors()
-		module_handle = LLVM.ModuleHandle(self, mod)
-		if make_permanent:
-			self.permanent_module_handles.append(module_handle)
-		return module_handle
-
-	def get_function(self, name):
-		return self.engine.get_function_address(name)
-
-	class ModuleHandle:
-		def __init__(self, parent, mod):
-			self.parent = parent
-			self.mod = mod
-
-		def __del__(self):
-			self.parent.engine.remove_module(self.mod)
-
-class FunctionIR:
-	def __init__(self, name, arg_names):
-		self.name = name
-		self.arg_names = arg_names
-		self.global_defs = []
-		self.ir = []
-		self.tmp = 0
-
-		# Build the header.
-		self.add("define %L11Obj* @{0}(%L11Obj* %self, i32 %arg_count, %L11Obj** %arguments) {{\n".format(self.name))
-		# Check that we have the right number of arguments.
-		self.add("\t; verify argument count\n")
-		self.add("\t%args_good_flag = icmp eq i32 {0}, %arg_count\n".format(len(arg_names)))
-		self.add("\tbr i1 %args_good_flag, label %ArgsGood, label %ArgsBad\n")
-		self.add("ArgsBad:\n")
-		error_string = self.get_string_ptr("bad argument count")
-		self.add("\tcall void @l11_panic(i8* %{0})\n".format(error_string))
-		self.add("\tret %L11Obj* undef\n")
-		self.add("ArgsGood:\n")
-		# Get the arguments.
-		for i, arg_name in enumerate(self.arg_names):
-			tmp = self.get_tmp()
-			self.add("\t; unpack arg {0}\n".format(arg_name))
-			self.add("\t%{0} = getelementptr %L11Obj*, %L11Obj** %arguments, i32 {1}\n".format(tmp, i))
-			self.add("\t%{0} = load %L11Obj*, %L11Obj** %{1}\n".format(arg_name, tmp))
-
-	def finalize(self):
-		# Exhibit UB on falling off the end.
-		self.add("\tret %L11Obj* undef\n")
-		self.add("}")
-
-	def get_tmp(self):
-		self.tmp += 1
-		return "tmp.%i" % (self.tmp,)
-
-	def apply(self, fn_obj, args):
-		self.add("\t; {0} applied to {1}\n".format(fn_obj, args))
-		args_array = self.get_tmp()
-		self.add("\t%{0} = alloca %L11Obj*, i32 {1}\n".format(args_array, len(args)))
-		for i, arg in enumerate(args):
-			arg_insert_ptr = self.get_tmp()
-			self.add("\t%{0} = getelementptr %L11Obj*, %L11Obj** %{1}, i32 {2}\n".format(
-				arg_insert_ptr,
-				args_array,
-				i,
-			))
-			self.add("\tstore %L11Obj* %{0}, %L11Obj** %{1}\n".format(arg, arg_insert_ptr))
-		result = self.get_tmp()
-		self.add("\t%{0} = call %L11Obj* @obj_apply(%L11Obj* %{1}, i32 {2}, %L11Obj** %{3})\n".format(
-			result,
-			fn_obj,
-			len(args),
-			args_array,
-		))
-		return result
-
-	def add_string(self, s):
-		name = "str." + self.get_tmp()
-		self.add_global("@{0} = private unnamed_addr constant [{1} x i8] {2}\n".format(
-			name,
-			len(s),
-			"[{0}]".format(
-				", ".join("i8 {0}".format(ord(c)) for c in s),
-			),
-		))
-		return name
-
-	def get_string_ptr(self, s):
-		string_name = self.add_string(s)
-		string_ptr = self.get_tmp()
-		self.add("\t%{0} = getelementptr [{1} x i8], [{1} x i8]* @{2}, i32 0, i32 0\n".format(
-			string_ptr,
-			len(s),
-			string_name,
-		))
-		return string_ptr
-
-	def lookup(self, obj, name):
-		self.add("\t; lookup {0} {1}\n".format(obj, name))
-		string_ptr = self.get_string_ptr(name)
-		result = self.get_tmp()
-		self.add("\t%{0} = call %L11Obj* @obj_lookup(%L11Obj* %{1}, i8* %{2}, i64 {3})\n".format(
-			result,
-			obj,
-			string_ptr,
-			len(name)
-		))
-		return result
-
-	def inc_ref(self, obj):
-		self.add("\tcall void @obj_inc_ref(%L11Obj* %{0})\n".format(obj))
-
-	def dec_ref(self, obj):
-		self.add("\tcall void @obj_dec_ref(%L11Obj* %{0})\n".format(obj))
-
-	def return_obj(self, obj):
-		self.add("\tret %L11Obj* %{0}\n".format(obj))
-
-	def add(self, s):
-		self.ir.append(s)
-
-	def add_global(self, s):
-		self.global_defs.append(s)
-
-	def format(self):
-		return "".join(self.global_defs) + "\n" + "".join(self.ir)
+	def get_snippet(self):
+		return self.seq
 
 class JIT:
 	def compile_top_level(self, top_level):
 		for decl in top_level.root_block.entries:
-			self.compile_func(decl.expr, decl.type_annotation)
+			result = self.compile_func(decl.name, decl.expr, decl.type_annotation)
+		return result
 
-	def compile_func(self, func, func_poly_type):
-		assert isinstance(func, core.AbsExpr)
-		print func
-		print func_poly_type
-		print func_poly_type.is_concrete()
-
-if __name__ == "__main__":
-	llvm = LLVM()
-
-	# Load up the runtime interface.
-	llvmlite.binding.load_library_permanently(runtime.dll_path)
-	with open(os.path.join("runtime", "interface_runtime.ll")) as f:
-		prelude_ir = f.read()
-	llvm.add_to_prelude(prelude_ir)
-
-	f = FunctionIR("id", ["x", "y"])
-	result = f.apply("x", ["y", "x"])
-	result = f.lookup(result, "asdf")
-	f.dec_ref(result)
-	f.return_obj(result)
-	f.finalize()
-	ir = f.format()
-	print ir
-
-#	mod = llvm.compile("""
-#define i64 @car(%L11Obj* %obj) {
-#	%ptr = getelementptr %L11Obj, %L11Obj* %obj, i32 0, i32 0
-#	%value = load i64, i64* %ptr
-#	call void @debug_print_num(i64 %value)
-#	ret i64 %value
-#}
-#""")
-	mod = llvm.compile(ir)
-	fp = llvm.get_function("id")
-	print "Function pointer:", fp
+	def compile_func(self, name, func, func_poly_type):
+		abs_jit = AbstractionJIT(func)
+		snippet = abs_jit.get_snippet()
+		arg_count = len(func.arg_names)
+		function = jitllvm.Function(name, snippet, arg_count)
+		function.compile()
+		return function
+#		return abs_jit.get_snippet()
+#		assert isinstance(func, core.AbsExpr)
+#		contents = 
+#		return self.to_snippet(func)
+#		print func.result_expr
+#		print dir(func)
+#		print func_poly_type
+#		print func_poly_type.is_concrete()
 
 if __name__ == "__main__":
 	p = argparse.ArgumentParser()
@@ -227,6 +113,22 @@ if __name__ == "__main__":
 
 	print utils.pretty(lowerer.top_level)
 
+	print "=" * 20, "JITing."
+
+	jitcore.initialize()
+
 	jit = JIT()
-	jit.compile_top_level(lowerer.top_level)
+	function = jit.compile_top_level(lowerer.top_level)
+	#final_snippet = jit.compile_top_level(lowerer.top_level)
+
+	print "Function built!"
+
+	print function.function_pointer
+
+#	# Test out this snippet.
+#	dest = jitcore.IRDestination()
+#	assumptions = jitcore.AssumptionContext()
+#	final_snippet.instantiate(dest, assumptions, ["%x"])
+
+#	print dest.format()
 

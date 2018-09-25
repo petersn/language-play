@@ -45,6 +45,7 @@ tag_rules = {
 	"fnStub": ["name", "typeParams", "args", "returnType"],
 	"parameterStub": ["name", "typeAnnot"],
 	"appExpr": ["fn", "args"],
+	"methodCallExpr": ["fn", "methodName", "args"],
 	"lambdaExpr": ["args", "returnType", "result"],
 	"typeGeneric": ["generic", "args"],
 	"matchArm": ["pattern", "result"],
@@ -55,6 +56,7 @@ tag_rules = {
 	"letExpr": ["name", "optionalTypeAnnot", "expr1", "expr2"],
 	"qualName": None,
 	"ident": None,
+	"litNum": None,
 	"query": ["query"],
 	"typeQuery": ["expr"],
 	"traitQuery": ["trait", "type"],
@@ -143,6 +145,13 @@ class Visitor(antlr4.ParseTreeVisitor):
 	def visitIdent(self, node):
 		# TODO: Remove str. For now suppress unicode like an evil person.
 		yield str(node.ID().symbol.text)
+
+	def visitLitNum(self, node):
+		text = node.getText()
+		try:
+			yield Node("lit", int(text))
+		except ValueError:
+			yield Node("lit", float(text))
 
 def parse(s, kind="codeBlock"):
 	lexer = langLexer.langLexer(antlr4.InputStream(s))

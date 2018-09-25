@@ -276,6 +276,20 @@ class Expr(utils.HashableMixin):
 	def __repr__(self):
 		return str(utils.pretty(self))
 
+class LiteralExpr(Expr):
+	def __init__(self, literal):
+		assert isinstance(literal, (int, float, str))
+		self.literal = literal
+
+	def key(self):
+		return self.literal
+
+	def pretty(self, b):
+		b.write("lit(%r)" % (self.literal,))
+
+	def name_deps(self):
+		return set()
+
 class BlockExpr(Expr):
 	def __init__(self, code_block):
 		self.code_block = code_block
@@ -312,6 +326,35 @@ class AppExpr(Expr):
 
 	def pretty(self, b):
 		self.fn_expr.pretty(b)
+		b.write("(")
+		for i, arg_expr in enumerate(self.arg_exprs):
+			arg_expr.pretty(b)
+			if i != len(self.arg_exprs) - 1:
+				b.write(", ")
+		b.write(")")
+
+	def name_deps(self):
+		v = self.fn_expr.name_deps()
+		for arg in self.arg_exprs:
+			v |= arg.name_deps()
+		return v
+
+# This is hopefully temporary.
+# I hope to one day switch this over to a "trait resolution" node.
+# The idea is that we would lower x.foo(y) into some sort of:
+#   trait_resolve(x, "foo")(x, y)
+class MethodCallExpr(Expr):
+	def __init__(self, fn_expr, method_name, arg_exprs):
+		self.fn_expr = fn_expr
+		self.method_name = method_name
+		self.arg_exprs = arg_exprs
+
+	def key(self):
+		return self.fn_expr, self.method_name, tuple(self.arg_exprs)
+
+	def pretty(self, b):
+		self.fn_expr.pretty(b)
+		b.write("::%s" % (self.method_name,))
 		b.write("(")
 		for i, arg_expr in enumerate(self.arg_exprs):
 			arg_expr.pretty(b)

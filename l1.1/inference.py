@@ -173,7 +173,13 @@ class Inference:
 		return result
 
 	def _J(self, gamma, expr, depth=0):
-		if isinstance(expr, core.VarExpr):
+		if isinstance(expr, core.LiteralExpr):
+			return {
+				int: core.AppType("int", []),
+				float: core.AppType("float", []),
+				str: core.AppType("str", []),
+			}[type(expr.literal)]
+		elif isinstance(expr, core.VarExpr):
 			if expr in gamma:
 				return self.inst(gamma[expr])
 			raise ValueError("Unknown variable: %r" % (expr,))
@@ -188,6 +194,10 @@ class Inference:
 				core.AppType("fun", arg_types + [result_type]),
 			)
 			return result_type
+		elif isinstance(expr, core.MethodCallExpr):
+			# Darn, we have no idea at all!
+			# XXX: TODO: Make this not completely stupid, using trait resolution.
+			return self.new_type()
 		elif isinstance(expr, core.AbsExpr):
 			args = [core.VarExpr(arg_name) for arg_name in expr.arg_names]
 			# Do inference on the result expression, in a context where the argument has a fresh type.

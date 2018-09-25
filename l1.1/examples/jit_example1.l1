@@ -1,0 +1,8 @@
+
+fn test(arg) {
+	x := 17;
+	y := arg;
+	z := (x.__add__(y)).__add__(y);
+	return z;
+}
+

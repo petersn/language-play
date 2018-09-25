@@ -100,15 +100,20 @@ class Lowerer:
 		elif ast.name == "appExpr":
 			return core.AppExpr(
 				self.lower_expr(ast["fn"]),
-				[
-					self.lower_expr(arg)
-					for arg in ast["args"]
-				],
+				[self.lower_expr(arg) for arg in ast["args"]],
+			)
+		elif ast.name == "methodCallExpr":
+			return core.MethodCallExpr(
+				self.lower_expr(ast["fn"]),
+				ast["methodName"],
+				[self.lower_expr(arg) for arg in ast["args"]],
 			)
 		elif ast.name == "qualName":
 			return core.VarExpr(extract_qual_name(ast))
 		elif ast.name == "lambdaExpr":
 			return self.lower_lambda_or_fn_ast(ast)
+		elif ast.name == "lit":
+			return core.LiteralExpr(ast.contents)
 		raise NotImplementedError("Not handled expr: %r" % (ast,))
 
 	def unpack_fn_types_helper(self, ast):
