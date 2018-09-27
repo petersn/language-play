@@ -140,7 +140,7 @@ def populate_methods():
 		unboxer = force_unboxers[kind_name]
 		operation_snippet = make_trivial_operation_snippet(arity, unboxer, result_type, ir_template)
 		function = jitllvm.Function(operation_name, operation_snippet, arity)
-		jitcore.kind_table[kind_name][operation_name] = operation_snippet
+		jitcore.kind_table[kind_name][operation_name] = function #operation_snippet
 
 def populate():
 	populate_kinds()

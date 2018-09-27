@@ -6,3 +6,10 @@ fn test(arg) {
 	return z;
 }
 
+fn main() {
+	x := 17;
+	y := 42;
+	z := (x.__add__(y)).__add__(y);
+	return z;
+}
+

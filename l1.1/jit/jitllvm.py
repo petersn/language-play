@@ -46,7 +46,13 @@ class Function:
 		self.snippet = snippet
 		self.arg_count = arg_count
 
-	def compile(self):
+	def instantiate(self, dest, assumptions, inputs):
+		print "Usage of function:", self.name
+		return self.snippet.instantiate(dest, assumptions, inputs)
+
+	def compile(self, assumptions):
+		# don't mutate the assumptions.
+		assumptions = assumptions.copy()
 		dest = jitcore.IRDestination()
 		dest.add("define %L11Obj* @{0}(%L11Obj* %self, i32 %arg_count, %L11Obj** %arguments) {{\n".format(self.name))
 
@@ -69,7 +75,6 @@ class Function:
 			arg = dest.new_tmp()
 			dest.add("\t{0} = load %L11Obj*, %L11Obj** {1}\n".format(arg, load_ptr))
 			args.append(arg)
-		assumptions = jitcore.AssumptionContext()
 		result, = self.snippet.instantiate(dest, assumptions, args)
 		# Force the result into a box.
 		result, = jitcore.ForceBoxSnippet().instantiate(dest, assumptions, [result])
@@ -89,11 +94,10 @@ class RawFunction:
 		self.snippet = snippet
 		self.arg_count = arg_count
 
-	def compile(self):
+	def compile(self, assumptions):
 		dest = jitcore.IRDestination()
 		dest.add("define i64 @{0}() {{\n".format(self.name))
 		# Build the raw function.
-		assumptions = jitcore.AssumptionContext()
 		self.snippet.instantiate(dest, assumptions, [])
 		dest.add("\tret i64 -1\n")
 		dest.add("}\n")

@@ -5,7 +5,7 @@ jit.py
 Contains logic for JITing core programs down into jitcore.Snippets, which in turn produce IR.
 """
 
-import os, argparse
+import os, argparse, ctypes
 import parsing
 import core
 import inference
@@ -67,18 +67,36 @@ class AbstractionJIT:
 		return self.seq
 
 class JIT:
-	def compile_top_level(self, top_level):
-		for decl in top_level.root_block.entries:
-			result = self.compile_func(decl.name, decl.expr, decl.type_annotation)
-		return result
+	def __init__(self):
+		self.assumptions = jitcore.AssumptionContext()
+		self.functions = []
 
-	def compile_func(self, name, func, func_poly_type):
+	def get_name(self, name):
+		return self.assumptions.get_name(name)
+
+	def add_top_level(self, top_level):
+		for decl in top_level.root_block.entries:
+			func = self.build_func(decl.name, decl.expr, decl.type_annotation)
+			self.functions.append(func)
+			self.assumptions.set_name(decl.name, func)
+
+	def build_func(self, name, func, func_poly_type):
 		abs_jit = AbstractionJIT(func)
 		snippet = abs_jit.get_snippet()
 		arg_count = len(func.arg_names)
 		function = jitllvm.Function(name, snippet, arg_count)
-		function.compile()
 		return function
+
+	def compile(self):
+		for func in self.functions:
+			func.compile(self.assumptions)
+
+	def apply_function(self, func, args):
+		argument_buf = (len(args) * runtime.L11ObjPtr)()
+		for i, arg in enumerate(args):
+			argument_buf[i] = arg
+		return runtime.obj_apply(func.function_l11obj, len(args), argument_buf)
+
 #		return abs_jit.get_snippet()
 #		assert isinstance(func, core.AbsExpr)
 #		contents = 
@@ -118,17 +136,14 @@ if __name__ == "__main__":
 	jitcore.initialize()
 
 	jit = JIT()
-	function = jit.compile_top_level(lowerer.top_level)
-	#final_snippet = jit.compile_top_level(lowerer.top_level)
+	jit.add_top_level(lowerer.top_level)
+	jit.compile()
 
-	print "Function built!"
+	print "=" * 20, "Executing."
 
-	print function.function_pointer
+	function = jit.get_name("main")
+	result = jit.apply_function(function, [])
 
-#	# Test out this snippet.
-#	dest = jitcore.IRDestination()
-#	assumptions = jitcore.AssumptionContext()
-#	final_snippet.instantiate(dest, assumptions, ["%x"])
-
-#	print dest.format()
+#	result = ctypes.cast(result, ctypes.POINTER(ctypes.c_long))
+#	print result[:3]
 

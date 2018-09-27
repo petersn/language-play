@@ -33,8 +33,8 @@ class Kind:
 		return self.members[key]
 
 	def __setitem__(self, key, value):
-#		assert isinstance(value, jitllvm.Function)
-		assert isinstance(value, Snippet)
+		assert isinstance(value, jitllvm.Function)
+#		assert isinstance(value, Snippet)
 		self.members[key] = value
 
 	def __contains__(self, key):
@@ -107,6 +107,10 @@ class Info:
 		if value != None:
 			self.set_value(value)
 
+	def copy(self):
+		# XXX: I'm 95% sure this is broken when ty != ValueType.L11OBJ, and kind != None.
+		return Info(self.ty, kind=self.kind, value=self.value)
+
 	def __repr__(self):
 		return "<type=%r kind=%r value=%r>" % (self.ty, self.kind, self.value)
 
@@ -142,6 +146,15 @@ class Info:
 class AssumptionContext:
 	def __init__(self):
 		self.gamma = {}
+		self.name_table = {}
+
+	def copy(self):
+		new = AssumptionContext()
+		# Deep copy the Infos, because they have mutable state.
+		new.gamma = {k: v.copy() for k, v in self.gamma.iteritems()}
+		# In theory the name table is only used immutably, so just shallow copy it.
+		new.name_table = self.name_table.copy()
+		return new
 
 	def __setitem__(self, name, info):
 		assert isinstance(name, str)
@@ -155,6 +168,16 @@ class AssumptionContext:
 		if name not in self.gamma:
 			self[name] = Info(ValueType.L11OBJ)
 		return self.gamma[name]
+
+	def set_name(self, name, value):
+		assert isinstance(name, str)
+		# For now names can only be assigned to functions.
+		assert isinstance(value, jitllvm.Function)
+		assert name not in self.name_table, "No reassignment of names in a context!"
+		self.name_table[name] = value
+
+	def get_name(self, name):
+		return self.name_table[name]
 
 class IRDestination:
 	def __init__(self):
