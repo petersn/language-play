@@ -1,7 +1,7 @@
 
 all:
 	$(MAKE) -C antlr_parser/
-	$(MAKE) -C runtime/
+	$(MAKE) -C jit/
 
 .PHONY: test
 test:
