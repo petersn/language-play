@@ -4,7 +4,12 @@
 #include "runtime.h"
 
 L11Nil* global_nil = new L11Nil{};
+std::unordered_map<Kind, std::unique_ptr<KindTable>> global_kind_table;
 
+// interf: char* malloc(uint64_t)
+// interf: void free(char*)
+
+// interf: void obj_dec_ref(L11Obj*)
 extern "C" void obj_dec_ref(L11Obj* obj) {
 	obj->ref_count--;
 	if (obj->ref_count <= 0) {
@@ -21,6 +26,7 @@ extern "C" void obj_inc_ref(L11Obj* obj) {
 	obj->ref_count++;
 }
 
+// interf: L11Obj* obj_lookup(L11Obj*, char*, uint64_t)
 extern "C" L11Obj* obj_lookup(L11Obj* obj, const char* attribute_name, uint64_t attribute_name_len) {
 	KindTable* kind_table = global_kind_table.at(obj->kind).get();
 	std::string attribute(attribute_name, attribute_name_len);
@@ -29,6 +35,7 @@ extern "C" L11Obj* obj_lookup(L11Obj* obj, const char* attribute_name, uint64_t 
 	return result_obj;
 }
 
+// interf: L11Obj* obj_apply(L11Obj*, int, L11Obj**)
 extern "C" L11Obj* obj_apply(L11Obj* fn_obj, int arg_count, L11Obj** arguments) {
 	// If the object is a native function then call its code.
 	if (fn_obj->kind == BuiltinKinds::KIND_FUNCTION) {
@@ -48,6 +55,7 @@ extern "C" L11Obj* obj_apply(L11Obj* fn_obj, int arg_count, L11Obj** arguments) 
 	return obj_apply(call_method, arg_count, arguments);
 }
 
+// interf: L11Obj* obj_method_call(L11Obj*, char*, uint64_t, int, L11Obj**)
 extern "C" L11Obj* obj_method_call(L11Obj* obj, const char* attribute_name, uint64_t attribute_name_len, int arg_count, L11Obj** arguments) {
 	std::cout << "Obj: " << obj << std::endl;
 	std::cout << "Kind: " << obj->kind << std::endl;
@@ -58,6 +66,7 @@ extern "C" L11Obj* obj_method_call(L11Obj* obj, const char* attribute_name, uint
 	return obj_apply(method_obj, arg_count, arguments);
 }
 
+// interf: void l11_new_kind(Kind)
 extern "C" void l11_new_kind(Kind new_kind) {
 	global_kind_table.insert(std::make_pair(
 		new_kind,
@@ -65,11 +74,13 @@ extern "C" void l11_new_kind(Kind new_kind) {
 	));
 }
 
+// interf: void l11_kind_set_destructor(Kind, destructor_ptr)
 extern "C" void l11_kind_set_destructor(Kind kind, void (*destructor)(L11Obj* self)) {
 	KindTable* kind_table = global_kind_table.at(kind).get();
 	kind_table->destructor = destructor;
 }
 
+// interf: void l11_kind_set_member(Kind, char*, uint64_t, L11Obj*)
 extern "C" void l11_kind_set_member(Kind kind, const char* attribute_name, uint64_t attribute_name_len, L11Obj* member) {
 	KindTable* kind_table = global_kind_table.at(kind).get();
 	std::string attribute(attribute_name, attribute_name_len);
@@ -80,6 +91,7 @@ extern "C" void l11_kind_set_member(Kind kind, const char* attribute_name, uint6
 	obj_inc_ref(member);
 }
 
+// interf: L11Obj*      l11_create_function_from_pointer(apply_ptr)
 extern "C" L11Function* l11_create_function_from_pointer(L11Obj* (*native_code)(L11Function* self, int arg_count, L11Obj** arguments)) {
 	L11Function* function = new L11Function;
 	function->ref_count = 1;
@@ -88,28 +100,24 @@ extern "C" L11Function* l11_create_function_from_pointer(L11Obj* (*native_code)(
 	return function;
 }
 
+// interf: void l11_panic(char*)
 extern "C" void l11_panic(const char* error_message) {
 	std::cerr << "Panic: " << error_message << std::endl;
 	std::abort();
 }
 
+// interf: void debug_obj_summary(L11Obj*)
 extern "C" void debug_obj_summary(L11Obj* obj) {
 	std::cout << "Object: " << obj << " with ref=" << obj->ref_count << " kind=" << obj->kind << std::endl;
 }
 
-extern "C" void* debug_malloc(uint64_t bytes) {
-	return static_cast<void*>(new uint8_t[bytes]);
-}
-
-extern "C" void debug_free(void* ptr) {
-	delete static_cast<uint8_t*>(ptr);
-}
-
+// interf: void debug_destructor(L11Obj*)
 extern "C" void debug_destructor(L11Obj* self) {
 	std::cout << "Debug destructor called on " << self << std::endl;
 	delete reinterpret_cast<uint8_t*>(self);
 }
 
+// interf: L11Obj* debug_apply(L11Obj*, int, L11Obj**)
 extern "C" L11Obj* debug_apply(L11Obj* self, int arg_count, L11Obj** arguments) {
 	std::cout << "Debug apply called on " << self << " with " << arg_count << " arguments." << std::endl;
 	for (int i = 0; i < arg_count; i++)
@@ -119,6 +127,7 @@ extern "C" L11Obj* debug_apply(L11Obj* self, int arg_count, L11Obj** arguments) 
 	return self;
 }
 
+// interf: void debug_print_num(int64_t)
 extern "C" void debug_print_num(int64_t x) {
 	std::cout << "Debug number: " << x << std::endl;
 }

@@ -59,7 +59,7 @@ extern "C" L11Obj* debug_apply(L11Obj* self, int arg_count, L11Obj** arguments);
 extern "C" void debug_print_num(int64_t x);
 
 extern L11Nil* global_nil;
-std::unordered_map<Kind, std::unique_ptr<KindTable>> global_kind_table;
+extern std::unordered_map<Kind, std::unique_ptr<KindTable>> global_kind_table;
 
 #endif
 

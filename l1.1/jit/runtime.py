@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-import os, ctypes
+import os, ctypes, json
 
 runtime_dir = os.path.dirname(os.path.realpath(__file__))
 dll_path = os.path.join(runtime_dir, "libruntime.so")
@@ -22,35 +22,36 @@ apply_type = ctypes.CFUNCTYPE(L11ObjPtr, L11ObjPtr, ctypes.c_int, ctypes.POINTER
 # Unfortunately I can't figure out how to get ctypes to respect the above types, so just use void* instead... :(
 destructor_type = apply_type = ctypes.c_void_p
 
-desc = [
-	("obj_dec_ref", None, [L11ObjPtr]),
-	("obj_inc_ref", None, [L11ObjPtr]),
-	("obj_lookup", L11ObjPtr, [L11ObjPtr, ctypes.c_char_p, ctypes.c_ulong]),
-	("obj_apply", L11ObjPtr, [L11ObjPtr, ctypes.c_int, ctypes.POINTER(L11ObjPtr)]),
-	("l11_new_kind", None, [Kind]),
-	("l11_kind_set_destructor", None, [Kind, destructor_type]),
-	("l11_kind_set_member", None, [Kind, ctypes.c_char_p, ctypes.c_ulong, L11ObjPtr]),
-	# Here we claim a return of the parent class L11ObjPtr, even though it's actually always an L11Function*...
-	("l11_create_function_from_pointer", L11ObjPtr, [apply_type]),
-	("l11_panic", None, [ctypes.c_char_p]),
-	("debug_obj_summary", None, [L11ObjPtr]),
-	("debug_malloc", ctypes.c_void_p, [ctypes.c_ulong]),
-	("debug_free", None, [ctypes.c_void_p]),
-	("debug_destructor", None, [L11ObjPtr]),
-	("debug_apply", None, [L11ObjPtr, ctypes.c_int, ctypes.POINTER(L11ObjPtr)]),
-	("debug_print_num", None, [ctypes.c_long]),
-]
+ctype_map = {
+	"void": None,
+	"L11Obj*": L11ObjPtr,
+	"L11Obj**": ctypes.POINTER(L11ObjPtr),
+	"char*": ctypes.c_char_p,
+	"int64_t": ctypes.c_long,
+	"uint64_t": ctypes.c_ulong,
+	"int": ctypes.c_int,
+	"Kind": ctypes.c_ulong,
+	"destructor_ptr": destructor_type,
+	"apply_ptr": apply_type,
+	"string*": ctypes.c_void_p,
+}
 
-for name, restype, argtypes in desc:
-	f = globals()[name] = getattr(dll, name)
-	f.restype = restype
-	f.argtypes = argtypes
+with open(os.path.join(runtime_dir, "interface.json")) as f:
+	interface_desc = json.load(f)
+
+for defin in interface_desc["defins"]:
+	f = globals()[defin["name"]] = getattr(dll, defin["name"])
+	f.restype = ctype_map[defin["return"]]
+	f.argtypes = [ctype_map[arg] for arg in defin["args"]]
 
 if __name__ == "__main__":
+	print "Testing code not working right now."
+	exit()
+
 	# Make a new kind 1 with debug fields.
 	l11_new_kind(1)
 	l11_kind_set_destructor(1, debug_destructor)
-	l11_kind_set_apply(1, debug_apply)
+	l11_kind_set_member(1, "__call__", len("__call__"), ctypes.cast(debug_apply, ctypes.c_void_p))
 
 	# Create an L11Obj with one ref and our new kind.
 	_ptr = debug_malloc(8)
@@ -66,11 +67,4 @@ if __name__ == "__main__":
 	returned_obj = obj_apply(ptr, 2, arg_array)
 	# To obey our reference ownership protocol we have to decrement this reference.
 	obj_dec_ref(returned_obj)
-
-	# Remove the last reference and therefore delete.
-#	print "About to free."
-#	debug_obj_summary(ptr)
-#	obj_dec_ref(returned_obj)
-
-#	l11_panic("Goodbye!")
 
