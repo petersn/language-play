@@ -23,6 +23,8 @@ def parse_term(s):
 			applicee, k = parse(toks, j)
 			assert toks[k] == ")"
 			return easy.App(applicand, applicee), k + 1
+		elif toks[i] == "Type":
+			return easy.RootType(), i + 1
 		return easy.Var(toks[i]), i + 1
 
 	term, i = parse(s, 0)
