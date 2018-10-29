@@ -3,7 +3,7 @@
 import sys
 sys.modules["easy"] = sys.modules["__main__"]
 
-import enum
+import enum, collections
 import easy_parse
 
 class HashableMixin:
@@ -28,11 +28,13 @@ class Context:
 	def __init__(self):
 		self.typings = {}
 		self.definitions = {}
+		self.inductives = {}
 
 	def copy(self):
 		new_ctx = Context()
 		new_ctx.typings = self.typings.copy()
 		new_ctx.definitions = self.definitions.copy()
+		new_ctx.inductives = self.inductives.copy()
 		return new_ctx
 
 	def contains_ty(self, var):
@@ -65,6 +67,61 @@ class Context:
 		ctx.definitions[var] = term
 		return ctx
 
+class Parameters:
+	def __init__(self, names, types):
+		assert len(names) == len(types)
+		assert all(isinstance(name, str) for name in names)
+		assert all(isinstance(ty, Term) for ty in types)
+		self.names = names
+		self.types = types
+
+	def __repr__(self):
+		return " ".join(
+			"(%s : %s)" % (name, ty)
+			for name, ty in zip(self.names, self.types)
+		)
+
+class Inductive:
+	class Constructor:
+		def __init__(self, ty):
+			assert isinstance(ty, Term)
+			self.ty = ty
+
+	def __init__(self, ctx, name, parameters, arity):
+		assert isinstance(name, str)
+		assert isinstance(parameters, Parameters)
+		assert isinstance(arity, Term)
+		self.name = name
+		self.parameters = parameters
+		self.arity = arity
+		self.constructors = collections.OrderedDict()
+
+		# Check the arity is appropriately a product ending in a sort.
+		# XXX: Is the inductive itself allowed in the arity anywhere?
+		self.check_arity(arity)
+
+		assert name not in ctx.inductives, "Cannot redefine inductive."
+		ctx.inductives[name] = self
+
+	def check_arity(self, arity):
+		# A sort is always a valid arity.
+		if arity.is_sort():
+			return
+		assert isinstance(arity, DepProd), "Arities must be a product terminating with a sort."
+		self.check_arity(arity.result_ty)
+
+	def add_constructor(self, con_name, ty):
+		self.constructors[con_name] = Inductive.Constructor(ty)
+		# XXX: TODO: Check positivity!
+		# This is necessary for consistency!
+
+	def pprint(self):
+		print "Inductive %s %s: %s :=" % (self.name, self.parameters, self.arity)
+		for con_name, con in self.constructors.iteritems():
+			print "  | %s : %s" % (con_name, con.ty)
+
+# ===== Define term ilks =====
+
 class Term(HashableMixin):
 	def key(self): raise NotImplementedError
 	def __repr__(self): raise NotImplementedError
@@ -78,6 +135,9 @@ class Term(HashableMixin):
 		inferred_type = self.infer(ctx)
 		if not compare_terms(ctx, inferred_type, ty):
 			raise TypeCheckFailure("Failure to match: %r != %r" % (inferred_type, ty))
+
+	def is_sort(self):
+		return False
 
 class Annot(Term):
 	def __init__(self, term, ty):
@@ -101,7 +161,7 @@ class Annot(Term):
 
 	def infer(self, ctx):
 		# XXX: This might not be right.
-		self.ty.check(ctx, RootType())
+		self.ty.check(ctx, SortType())
 		self.term.check(ctx, self.ty), "Type annotation failed!"
 		return self.ty
 
@@ -110,12 +170,18 @@ class Annot(Term):
 		# Hmm...
 		return self.term.free_vars() | self.ty.free_vars()
 
-class RootType(Term):
+class SortType(Term):
+	def __init__(self, universe_index):
+		assert isinstance(universe_index, int)
+		assert universe_index >= 0
+		self.universe_index = universe_index
+
 	def key(self):
-		return
+		return self.universe_index
 
 	def __repr__(self):
-		return "\xf0\x9d\x95\x8b"
+		subscript_digits = {"%i" % (i,): "\xe2\x82" + chr(0x80 + i) for i in xrange(10)}
+		return "\xf0\x9d\x95\x8b%s" % ("".join(subscript_digits[c] for c in str(self.universe_index)),)
 
 	def subst(self, x, y):
 		return self
@@ -124,8 +190,7 @@ class RootType(Term):
 		return self
 
 	def infer(self, ctx):
-		# XXX: Girard's paradox.
-		return self
+		return SortType(self.universe_index + 1)
 
 	def check(self, ctx, ty):
 		if ty != self:
@@ -133,6 +198,17 @@ class RootType(Term):
 
 	def free_vars(self):
 		return set()
+
+	def is_sort(self):
+		return True
+
+class SortProp(SortType):
+	def __repr__(self):
+		return "\xe2\x84\x99"
+
+	def infer(self, ctx):
+		# Implement Prop : Type
+		return SortType()
 
 class Var(Term):
 	def __init__(self, var):
@@ -193,8 +269,8 @@ class DepProd(Term):
 
 	def infer(self, ctx):
 		# Check all the types.
-		self.var_ty.check(ctx, RootType())
-		return RootType()
+		self.var_ty.check(ctx, SortType())
+		return SortType()
 
 	def check(self, ctx, ty):
 		return self.infer(ctx) == ty
@@ -228,7 +304,7 @@ class Abs(Term):
 #		return Abs(self.var, self.var_ty.normalize(ctx, strategy), self.result.normalize(ctx, strategy))
 
 	def infer(self, ctx):
-		self.var_ty.check(ctx, RootType())
+		self.var_ty.check(ctx, SortType())
 		ctx = ctx.extend_ty(self.var, self.var_ty)
 		u = self.result.infer(ctx)
 		# XXX: Do I need to abstract over self.var somehow?
@@ -272,6 +348,69 @@ class App(Term):
 	def free_vars(self):
 		return self.fn.free_vars() | self.arg.free_vars()
 
+class InductiveConstructor(Term):
+	def __init__(self, name, con_name):
+		self.name = name
+		self.con_name = con_name
+
+	def key(self):
+		return self.name, self.con_name
+
+	def __repr__(self):
+		return "@%s.%s" % (self.name, self.con_name)
+
+	def subst(self, x, y):
+		return self
+
+	def normalize(self, ctx, strategy):
+		return self
+
+	def infer(self, ctx):
+		return ctx.inductives[self.name].constructors[self.con_name].ty
+
+	def free_vars(self, ctx):
+		return set()
+
+class Match(Term):
+	class Arm(HashableMixin):
+		def __init__(self, pattern, result):
+			self.pattern = pattern
+			self.result = result
+
+		def key(self):
+			return self.pattern, self.result
+
+		def __repr__(self):
+			return "| %s => %s" % (self.pattern, self.result)
+
+	def __init__(self, matchand, as_term, in_term, return_term, arms):
+		assert all(isinstance(arm, Match.Arm) for arm in arms)
+		self.matchand = matchand
+		self.as_term = as_term
+		self.in_term = in_term
+		self.return_term = return_term
+		self.arms = tuple(arms)
+
+	def key(self):
+		return self.matchand, self.as_term, self.in_term, self.return_term, self.arms
+
+	def __repr__(self):
+		return "match %s as %s in %s return %s with%s end" % (
+			self.matchand,
+			self.as_term,
+			self.in_term,
+			self.return_term,
+			"".join(" %s" % (arm,) for arm in self.arms),
+		)
+
+	def subst(self, x, y):
+		# We have to be careful again about captures because
+		assert False
+
+	def normalize(self, ctx, strategy):
+		# Here's where we do complicated stuff!
+		pass
+
 # ===== End term ilks =====
 
 def compare_terms(ctx, t1, t2):
@@ -306,10 +445,10 @@ class AlphaCanonicalizer:
 				self.canonicalize(t.term),
 				self.canonicalize(t.ty),
 			)
-		elif isinstance(t, RootType):
+		elif isinstance(t, SortType):
 			return t
 		elif isinstance(t, (DepProd, Abs)):
-			# There is a subtle case here.
+			# There is an important case here.
 			# We need the following two expressions to canonicalize the same:
 			#   (fun x : T . (fun x : T . x))
 			#   (fun x : T . (fun y : T . y))
@@ -349,20 +488,46 @@ def alpha_canonicalize(term):
 def alpha_equivalent(t1, t2):
 	return alpha_canonicalize(t1) == alpha_canonicalize(t2)
 
+parse = easy_parse.parse_term
+
+if __name__ == "__main__":
+	ctx = Context()
+	nat = Inductive(
+		ctx,
+		"nat",
+		Parameters([], []),
+		parse("Type0"),
+#		Parameters(["T"], [parse("Type0")]),
+#		parse("(forall x : T . Type0)"),
+	)
+	nat.add_constructor("O", parse("nat"))
+	nat.add_constructor("S", parse("(forall _ : nat . nat)"))
+	nat.pprint()
+
+	x = parse("(@nat.S @nat.O)")
+	print x
+	print x.infer(ctx)
+	print x.normalize(ctx, EvalStrategy.CBV)
+
+	m = parse("match (@nat.S @nat.O) as x in x return nat with | foo => bar | (foo _)  => biz end")
+	print m
+
+	exit()
+
 if __name__ == "__main__":
 	ctx = Context()
 	x = easy_parse.parse_term("((fun x : nat . ((fun j : nat . j) x)) y)")
 	print x
 	print x.normalize(ctx, EvalStrategy.WHNF)
 
-	e1 = easy_parse.parse_term("(fun x : T . (fun x : Type . x))")
-	e2 = easy_parse.parse_term("(fun z : J . (fun y : Type . y))")
+	e1 = easy_parse.parse_term("(fun x : T . (fun x : Type0 . x))")
+	e2 = easy_parse.parse_term("(fun z : J . (fun y : Type0 . y))")
 	print e1
 	print e2
 	print alpha_equivalent(e1, e2)
 
-	print "=== Testing inference"
-	e = easy_parse.parse_term("(fun x : (forall y : Type . y) . (x z))")
-	print e
-	print e.infer(ctx)
+#	print "=== Testing inference"
+#	e = easy_parse.parse_term("(fun x : (forall y : Type0 . y) . (x x))")
+#	print e
+#	print e.infer(ctx)
 
