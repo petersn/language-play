@@ -16,13 +16,13 @@ def parse_term(s):
 			assert toks[j] == "."
 			expr_term, k = parse(toks, j + 1)
 			assert toks[k] == ")"
-			kind = {"fun": easy.Abs, "forall": easy.DepProd}[toks[i+1]]
+			kind = {"fun": easy.Abstraction, "forall": easy.DependentProduct}[toks[i+1]]
 			return kind(var, type_term, expr_term), k + 1
 		elif toks[i] == "(":
 			applicand, j = parse(toks, i + 1)
 			applicee, k = parse(toks, j)
 			assert toks[k] == ")"
-			return easy.App(applicand, applicee), k + 1
+			return easy.Application(applicand, applicee), k + 1
 		elif toks[i].startswith("Type"):
 			universe_index = int(toks[i][4:])
 			return easy.SortType(universe_index), i + 1

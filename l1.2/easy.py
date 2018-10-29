@@ -107,7 +107,7 @@ class Inductive:
 		# A sort is always a valid arity.
 		if arity.is_sort():
 			return
-		assert isinstance(arity, DepProd), "Arities must be a product terminating with a sort."
+		assert isinstance(arity, DependentProduct), "Arities must be a product terminating with a sort."
 		self.check_arity(arity.result_ty)
 
 	def add_constructor(self, con_name, ty):
@@ -139,7 +139,7 @@ class Term(HashableMixin):
 	def is_sort(self):
 		return False
 
-class Annot(Term):
+class Annotation(Term):
 	def __init__(self, term, ty):
 		self.term = term
 		self.ty = ty
@@ -151,10 +151,10 @@ class Annot(Term):
 		return "%s :: %s" % (self.term, self.ty)
 
 	def subst(self, x, y):
-		return Annot(self.term.subst(x, y), self.ty.subst(x, y))
+		return Annotation(self.term.subst(x, y), self.ty.subst(x, y))
 
 	def normalize(self, ctx, strategy):
-		return Annot(
+		return Annotation(
 			self.term.normalize(ctx, strategy),
 			self.ty.normalize(ctx, strategy),
 		)
@@ -238,7 +238,7 @@ class Var(Term):
 	def free_vars(self):
 		return set([self])
 
-class DepProd(Term):
+class DependentProduct(Term):
 	def __init__(self, var, var_ty, result_ty):
 		assert isinstance(var, Var)
 		self.var = var
@@ -257,7 +257,7 @@ class DepProd(Term):
 	def subst(self, x, y):
 		# For now don't handle this case, as it means we were probably inappropriately alpha-sensitive.
 		assert x != self.var
-		return DepProd(
+		return DependentProduct(
 			self.var,
 			self.var_ty.subst(x, y),
 			self.result_ty.subst(x, y),
@@ -265,7 +265,7 @@ class DepProd(Term):
 
 	def normalize(self, ctx, strategy):
 		return self
-#		return DepProd(self.var, self.var_ty.normalize(ctx, strategy), self.res_ty.normalize(ctx, strategy))
+#		return DependentProduct(self.var, self.var_ty.normalize(ctx, strategy), self.res_ty.normalize(ctx, strategy))
 
 	def infer(self, ctx):
 		# Check all the types.
@@ -278,7 +278,7 @@ class DepProd(Term):
 	def free_vars(self):
 		return self.var_ty.free_vars() | (self.result_ty.free_vars() - set([self.var]))
 
-class Abs(Term):
+class Abstraction(Term):
 	def __init__(self, var, var_ty, result):
 		assert isinstance(var, Var)
 		self.var = var
@@ -293,7 +293,7 @@ class Abs(Term):
 
 	def subst(self, x, y):
 		assert x != self.var
-		return Abs(
+		return Abstraction(
 			self.var,
 			self.var_ty.subst(x, y),
 			self.result.subst(x, y),
@@ -301,19 +301,19 @@ class Abs(Term):
 
 	def normalize(self, ctx, strategy):
 		return self
-#		return Abs(self.var, self.var_ty.normalize(ctx, strategy), self.result.normalize(ctx, strategy))
+#		return Abstraction(self.var, self.var_ty.normalize(ctx, strategy), self.result.normalize(ctx, strategy))
 
 	def infer(self, ctx):
 		self.var_ty.check(ctx, SortType())
 		ctx = ctx.extend_ty(self.var, self.var_ty)
 		u = self.result.infer(ctx)
 		# XXX: Do I need to abstract over self.var somehow?
-		return DepProd(self.var, self.var_ty, u)
+		return DependentProduct(self.var, self.var_ty, u)
 
 	def free_vars(self):
 		return self.var_ty.free_vars() | (self.result.free_vars() - set([self.var]))
 
-class App(Term):
+class Application(Term):
 	def __init__(self, fn, arg):
 		self.fn = fn
 		self.arg = arg
@@ -325,7 +325,7 @@ class App(Term):
 		return "(%s %s)" % (self.fn, self.arg)
 
 	def subst(self, x, y):
-		return App(self.fn.subst(x, y), self.arg.subst(x, y))
+		return Application(self.fn.subst(x, y), self.arg.subst(x, y))
 
 	def normalize(self, ctx, strategy):
 		fn = self.fn.normalize(ctx, strategy)
@@ -333,8 +333,8 @@ class App(Term):
 		if strategy == EvalStrategy.CBV:
 			arg = arg.normalize(ctx, strategy)
 		# If our function isn't concrete, then early out.
-		if not isinstance(fn, Abs):
-			return App(fn, arg)
+		if not isinstance(fn, Abstraction):
+			return Application(fn, arg)
 		# Perform a substitution.
 		instantiation = fn.result.subst(fn.var, arg)
 		return instantiation.normalize(ctx, strategy)
@@ -357,7 +357,8 @@ class InductiveConstructor(Term):
 		return self.name, self.con_name
 
 	def __repr__(self):
-		return "@%s.%s" % (self.name, self.con_name)
+		return self.con_name
+#		return "@%s.%s" % (self.name, self.con_name)
 
 	def subst(self, x, y):
 		return self
@@ -409,9 +410,27 @@ class Match(Term):
 
 	def normalize(self, ctx, strategy):
 		# Here's where we do complicated stuff!
-		pass
+		matchand = self.matchand.normalize(ctx, strategy)
+		head, args = extract_app_spine(matchand)
+		if not isinstance(head, InductiveConstructor):
+			# XXX: TODO: If we're evaluating CBV we should reduce some of the other terms too.
+			return Match(
+				matchand,
+				self.as_term,
+				self.in_term,
+				self.return_term,
+				self.arms,
+			)
+		# Do the pattern matching!
+		raise NotImplementedError("Pattern matching not implemented yet.")
 
 # ===== End term ilks =====
+
+def extract_app_spine(term):
+	if isinstance(term, Application):
+		head, args = extract_app_spine(term.fn)
+		return head, args + [term.arg]
+	return term, []
 
 def compare_terms(ctx, t1, t2):
 	t1 = t1.normalize(ctx, EvalStrategy.CBV)
@@ -422,7 +441,7 @@ def compare_terms(ctx, t1, t2):
 def coerce_to_product(ctx, term):
 	assert isinstance(term, Term)
 	term = term.normalize(ctx, EvalStrategy.WHNF)
-	assert isinstance(term, DepProd), "Bad product: %r" % (term,)
+	assert isinstance(term, DependentProduct), "Bad product: %r" % (term,)
 	return term
 
 class AlphaCanonicalizer:
@@ -440,14 +459,12 @@ class AlphaCanonicalizer:
 			if t not in self.subs:
 				self.subs[t] = self.new_var()
 			return self.subs[t]
-		elif isinstance(t, Annot):
-			return Annot(
+		elif isinstance(t, Annotation):
+			return Annotation(
 				self.canonicalize(t.term),
 				self.canonicalize(t.ty),
 			)
-		elif isinstance(t, SortType):
-			return t
-		elif isinstance(t, (DepProd, Abs)):
+		elif isinstance(t, (DependentProduct, Abstraction)):
 			# There is an important case here.
 			# We need the following two expressions to canonicalize the same:
 			#   (fun x : T . (fun x : T . x))
@@ -460,25 +477,27 @@ class AlphaCanonicalizer:
 			if t.var in self.subs:
 				saved_subs = self.subs.copy()
 				self.subs.pop(t.var)
-			if isinstance(t, DepProd):
-				return DepProd(
+			if isinstance(t, DependentProduct):
+				return DependentProduct(
 					self.canonicalize(t.var),
 					self.canonicalize(t.var_ty),
 					self.canonicalize(t.result_ty),
 				)
 			else:
-				return Abs(
+				return Abstraction(
 					self.canonicalize(t.var),
 					self.canonicalize(t.var_ty),
 					self.canonicalize(t.result),
 				)
 			if saved_subs != None:
 				self.subs = saved_subs
-		elif isinstance(t, App):
-			return App(
+		elif isinstance(t, Application):
+			return Application(
 				self.canonicalize(t.fn),
 				self.canonicalize(t.arg),
 			)
+		elif isinstance(t, (SortType, SortProp, InductiveConstructor)):
+			return t
 		raise NotImplementedError("Unhandled: %r" % (t,))
 
 def alpha_canonicalize(term):
@@ -509,8 +528,12 @@ if __name__ == "__main__":
 	print x.infer(ctx)
 	print x.normalize(ctx, EvalStrategy.CBV)
 
-	m = parse("match (@nat.S @nat.O) as x in x return nat with | foo => bar | (foo _)  => biz end")
+	print
+	print "===== Matches"
+
+	m = parse("match (@nat.S @nat.O) as x in x return nat with | @nat.O => @nat.O | (@nat.S y) => (@nat.S (@nat.S (f y))) end")
 	print m
+	print m.normalize(ctx, EvalStrategy.CBV)
 
 	exit()
 
