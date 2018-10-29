@@ -39,9 +39,11 @@ Terms are build out of the following ilks, with an example of each:
 
 Inductives can also be defined, and are always defined via the following vernacular syntax (not yet implemented):
 
-   Inductive example params : Ar :=
-     | constructor0 : constructor0_type
-	 | ...
+```
+Inductive example params : Ar :=
+  | constructor0 : constructor0_type
+  | ...
+```
 
 Here `params` consists of a sequence of zero or more Annotations, for example `(x : nat) (y : vec x)`.
 The "arity" `Ar` must be nested dependent products, ultimately terminating in some sort, for example: `(forall a : T . (forall b : (f a) . Type3))`.
