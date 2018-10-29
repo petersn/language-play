@@ -5,24 +5,34 @@
 Terms are build out of the following ilks, with an example of each:
 
 * Annotation: `(x : t)`
+
   Statically asserts that a given term has a given type, and also switches inference over to checking.
 * SortType: `Type2`
+
   Represents a single universe in the naturally-indexed hierarchy of predicative type universes.
 * SortProp: `Prop`
+
   Represents the single impredicative universe in which matches are restricted.
 * Var: `abc`
+
   Represents a reference to either a global inductive or definition by name, or a variable bound lexically be either a DependentProduct, Abstraction, Match (inside of a pattern's result), or Fix (bound to the recursive function name).
 * DependentProduct: `(forall x : T . U)`
+
   Represents a dependent product type (i.e. function type).
 * Abstraction: `(fun x : T . y)`
+
   Represents a lambda term.
 * Application: `(f x)`
+
   Represents the application of a term that has a DependentProduct type (a function) to an argument. For example, `f` could be an Abstraction or an InductiveConstructor.
 * InductiveConstructor: `@nat.S`
+
   Represents a reference to a particular constructor of a global inductive.
 * Match: `match t as x in ((I y1) y2) return P with | (@I.foo v) => v end`
+
   Represents a (dependent) pattern match on a given term.
 * Fix (TODO): Speculative syntax: `(fix f (x : T) : (forall y : U . B) => z)`
+
   Represents a structurally recursive (i.e. primitive recursive) function, via a least fixed point over a definition.
 
 ## Inductives
