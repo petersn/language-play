@@ -1,7 +1,10 @@
 #!/usr/bin/python
 
 import sys
-sys.modules["easy"] = sys.modules["__main__"]
+
+# Horrific hack workaround to deal with cyclic import.
+if __name__ == "__main__":
+	sys.modules["easy"] = sys.modules["__main__"]
 
 import enum, collections
 import easy_parse
@@ -148,7 +151,7 @@ class Annotation(Term):
 		return self.term, self.ty
 
 	def __repr__(self):
-		return "%s :: %s" % (self.term, self.ty)
+		return "(%s :: %s)" % (self.term, self.ty)
 
 	def subst(self, x, y):
 		return Annotation(self.term.subst(x, y), self.ty.subst(x, y))
@@ -241,6 +244,8 @@ class Var(Term):
 class DependentProduct(Term):
 	def __init__(self, var, var_ty, result_ty):
 		assert isinstance(var, Var)
+		assert isinstance(var_ty, Term)
+		assert isinstance(result_ty, Term)
 		self.var = var
 		self.var_ty = var_ty
 		self.result_ty = result_ty
@@ -423,6 +428,29 @@ class Match(Term):
 			)
 		# Do the pattern matching!
 		raise NotImplementedError("Pattern matching not implemented yet.")
+
+class Hole(Term):
+	def __init__(self, identifier=""):
+		assert isinstance(identifier, str)
+		self.identifier = identifier
+
+	def key(self):
+		return self.identifier
+
+	def __repr__(self):
+		return "_%s" % (self.identifier,)
+
+	def subst(self, x, y):
+		return self
+
+	def normalize(self, ctx, strategy):
+		return self
+
+	def infer(self, ctx):
+		raise NotImplementedError("Type inference cannot currently handle holes.")
+
+	def free_vars(self):
+		return set()
 
 # ===== End term ilks =====
 

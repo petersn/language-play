@@ -1,0 +1,62 @@
+
+%import common.ESCAPED_STRING
+%import common.SIGNED_NUMBER
+%import common.WS
+%ignore WS
+
+?term: application
+	| term2
+
+?term2: arrow
+	| term3
+
+?term3: annotation
+	| dependent_product
+	| arrow
+	| abstraction
+	| match
+	| fix
+	| IDENT
+	| "(" term ")"
+
+annotation: "(" term "::" term ")"
+
+dependent_product: "forall" typed_params "," term
+
+// FIXME: Make (forall x, A -> B) parse as (forall x, (A -> B)) rather than ((forall x, A) -> B)
+arrow: term2 "->" term3
+
+abstraction: "fun" typed_params "=>" term
+
+application: term term2
+
+match: "match" term extensions? "with" match_cases "end"
+
+extensions: "~" as_term? in_term? return_term?
+as_term: "as" term
+in_term: "in" term
+return_term: "return" term
+
+fix: "fix" IDENT typed_params fix_type_annotation ":=" term
+
+fix_type_annotation: ":" term
+	| "~"
+
+// There are several allowed cases.
+// We are allowed a single set of variables to be given a homogenous type with no parens.
+// For example: "a b c : nat"
+// We are also allowed as many groups as we want that either have an annotation and parens, or no annotation.
+// For example: "a (b c : nat) T (e : T)"
+typed_params: param_group
+	| hetero_group+
+untyped_param: IDENT
+param_group: IDENT+ ":" term
+?hetero_group: untyped_param
+	| "(" param_group ")"
+
+match_cases:
+	| "|"? match_case ("|" match_case)*
+match_case: term "=>" term
+
+IDENT: /[a-zA-Z][a-zA-Z0-9_']*/
+
