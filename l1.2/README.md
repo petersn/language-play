@@ -15,7 +15,7 @@ Terms are build out of the following ilks, with an example of each:
   Represents the single impredicative universe in which matches are restricted.
 * Var: `abc`
 
-  Represents a reference to either a global inductive or definition by name, or a variable bound lexically be either a DependentProduct, Abstraction, Match (inside of a pattern's result), or Fix (bound to the recursive function name).
+  Represents a reference to either a global inductive or definition by name, or a variable bound lexically by one of: DependentProduct, Abstraction, Match (inside of a pattern's result), or Fix (bound to the recursive function name).
 * DependentProduct: `(forall x : T . U)`
 
   Represents a dependent product type (i.e. function type).
