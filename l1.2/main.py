@@ -17,6 +17,8 @@ def vernac_definition(context, vernac):
 	# TODO: Properly unfold the typed_params as abstractions around the body.
 	# TODO: Properly check the type annotation.
 	body = parsing.unpack_term_ast(context, body)
+	body = parsing.wrap_with_typed_params(context, typed_params, body, "abstraction")
+
 	context.extend_def(easy.Var(str(name)), body, in_place=True)
 
 @vernacular_handler("vernac_axiom")
@@ -45,7 +47,8 @@ def vernac_inductive(context, vernac):
 		arity,
 	)
 
-	# Add the inductive in globally.
+	# Add the inductive in globally before we build constructors
+	# because the constructors must reference the inductive itself.
 	context.extend_def(easy.Var(str(name)), easy.InductiveRef(str(name)), in_place=True)
 
 	# Add the constructors.

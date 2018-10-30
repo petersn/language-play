@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# encoding: utf-8
 
 import sys
 
@@ -419,22 +420,39 @@ class ConstructorRef(Term):
 		return self
 
 	def infer(self, ctx):
-		return ctx.inductives[self.name].constructors[self.con_name].ty
+		return self.get_inductive(ctx).constructors[self.con_name].ty
 
 	def free_vars(self, ctx):
 		return set()
+
+	def get_inductive(self, ctx):
+		return ctx.inductives[self.name]
 
 class Match(Term):
 	class Arm(HashableMixin):
 		def __init__(self, pattern, result):
 			self.pattern = pattern
 			self.result = result
+			self.pattern_head, self.pattern_args = extract_app_spine(pattern)
+			# Demand that the pattern variables are all variables.
+			assert all(isinstance(i, Var) for i in self.pattern_args)
 
 		def key(self):
 			return self.pattern, self.result
 
 		def __repr__(self):
 			return "| %s => %s" % (self.pattern, self.result)
+
+		def subst(self, x, y):
+			# XXX: Subtle binding here to double-check!
+			result = self.result if x in self.pattern_args else self.result.subst(x, y)
+			return Match.Arm(
+				self.pattern.subst(x, y),
+				result,
+			)
+
+		def free_vars(self):
+			return self.result.free_vars() - set(self.pattern_args)
 
 	def __init__(self, matchand, as_term, in_term, return_term, arms):
 		assert all(isinstance(arm, Match.Arm) for arm in arms)
@@ -457,8 +475,15 @@ class Match(Term):
 		)
 
 	def subst(self, x, y):
-		# We have to be careful again about captures because
-		assert False
+		# We have to be careful again about captures because the arms form bindings, as do the as_term and in_term clauses.
+		# XXX: FIXME: How should I handle as_term, in_term, return_term?
+		return Match(
+			self.matchand.subst(x, y),
+			self.as_term.subst(x, y),
+			self.in_term.subst(x, y),
+			self.return_term.subst(x, y),
+			[arm.subst(x, y) for arm in self.arms],
+		)
 
 	def normalize(self, ctx, strategy):
 		# Here's where we do complicated stuff!
@@ -474,7 +499,39 @@ class Match(Term):
 				self.arms,
 			)
 		# Do the pattern matching!
-		raise NotImplementedError("Pattern matching not implemented yet.")
+		# Sanity check that all the arms are from the same inductive, and pull out the inductive they're from.
+		inductives = set(arm.pattern_head.get_inductive(ctx) for arm in self.arms)
+		if not inductives:
+			raise ValueError("How the hell did we get an actual value into a well-formed match with no arms (i.e. inhabitant of ⊥) during normalization!? This should only occur from unsoundness! ⊥-inhabitant was: %s" % (head,))
+		if len(inductives) > 1:
+			raise ValueError("Sanity-check failure: A well-formed match should only have one inductive represented across its arms!")
+		inductive, = inductives
+
+		# Find the matching arm.
+		for arm in self.arms:
+			if arm.pattern_head == head:
+				assert len(arm.pattern_args) == len(args), "We should have been ill-typed if we hit this assert!"
+				# Bind the pattern variables against the values held in the constructor application.
+				ctx = ctx.copy()
+				for var, value in zip(arm.pattern_args, args):
+					ctx.extend_def(var, value, in_place=True)
+				return arm.result.normalize(ctx, strategy)
+
+		raise ValueError("Sanity-check failure: How did our supposedly well-formed match fail to be exhaustive?")
+
+	def infer(self, ctx):
+		pass
+
+	def free_vars(self, ctx):
+		# XXX: This is probably wrong, as the as_term and in_term parts form bindings that should eliminate free variables from the return_term part.
+		root_free = reduce(lambda x, y: x | y, [
+			i.free_vars(ctx)
+			for i in [self.matchand, self.as_term, self.in_term, self.return_term]
+		])
+		arms_free = set()
+		for arm in self.arms:
+			arms_free |= arm.free_vars(ctx)
+		return root_free | arms_free
 
 class Axiom(Term):
 	def __init__(self, ty):

@@ -20,6 +20,10 @@ Infer apply_twice nat (apply_twice nat nat::S).
 
 Eval apply_twice nat (apply_twice nat nat::S) nat::O.
 
+Definition pred x : nat := match x with nat::O => nat::O | nat::S x' => x' end.
+
+Eval pred (nat::S (nat::S nat::O)).
+
 #Definition foo := Type0.
 #Definition bar := Type1.
 #Axiom x : foo.

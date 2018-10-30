@@ -56,17 +56,18 @@ abstraction: "fun" typed_params "=>" term
 
 application: term term2
 
-match: "match" term extensions? "with" match_arms "end"
+match: "match" term extensions "with" match_arms "end"
 
-extensions: "~" as_term? in_term? return_term?
+extensions:
+	| "~" as_term? in_term? return_term?
 as_term: "as" term
 in_term: "in" term
 return_term: "return" term
 
 fix: "fix" IDENT typed_params optional_type_annotation ":=" term
 
-optional_type_annotation: ":" term
-	|
+optional_type_annotation:
+	| ":" term
 
 // There are several allowed cases.
 // We are allowed a single set of variables to be given a homogenous type with no parens.
