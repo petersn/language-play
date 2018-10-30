@@ -16,6 +16,10 @@ Eval apply_twice nat nat::S nat::O.
 
 Infer apply_twice nat nat::S.
 
+Infer apply_twice nat (apply_twice nat nat::S).
+
+Eval apply_twice nat (apply_twice nat nat::S) nat::O.
+
 #Definition foo := Type0.
 #Definition bar := Type1.
 #Axiom x : foo.

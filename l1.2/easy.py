@@ -317,7 +317,18 @@ class Abstraction(Term):
 		return "(\xce\xbb %s : %s . %s)" % (self.var, self.var_ty, self.result)
 
 	def subst(self, x, y):
-		assert x != self.var
+		if x == self.var:
+			# This rule is important:
+			# If we're substituting y for x, and our current variable is x, then we
+			# block the substitution for proceeding any further in our result,
+			# because in our result x is freshly lexically bound. However, we must
+			# substitute y for x in our variable's type, because in its type it's
+			# still using the old binding for x.
+			return Abstraction(
+				self.var,
+				self.var_ty.subst(x, y),
+				self.result,
+			)
 		return Abstraction(
 			self.var,
 			self.var_ty.subst(x, y),
@@ -584,7 +595,7 @@ class AlphaCanonicalizer:
 				self.canonicalize(t.fn),
 				self.canonicalize(t.arg),
 			)
-		elif isinstance(t, (SortType, SortProp, ConstructorRef)):
+		elif isinstance(t, (SortType, SortProp, InductiveRef, ConstructorRef, Axiom, Hole)):
 			return t
 		raise NotImplementedError("Unhandled: %r" % (t,))
 
