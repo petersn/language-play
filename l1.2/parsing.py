@@ -12,16 +12,8 @@ grammar_text = "\n".join(
 	if not line.strip().startswith("//")
 )
 term_parser = lark.Lark(grammar_text, start="term")
-
-test_strings = [
-	"(x :: y)",
-	"forall x, A -> B",
-	"A -> B -> C",
-	# Unfortunately currently this one parses the x -> y part wrong.
-	"X -> forall a (b c : nat) T (e : T), x -> y",
-	"match x ~ as y return P with O => y | S x' => S (add x' y) end",
-#	"fix add x y : nat ~ := match x with O => y | S x' => S (add x' y) end",
-]
+# FIXME: Is there some way to reuse with the above grammar?
+vernac_parser = lark.Lark(grammar_text, start="vernacular")
 
 def unpack_typed_params(ctx, typed_params):
 	"""unpack_typed_params(typed_params) -> [(var1, ty1), ...]"""
@@ -98,11 +90,22 @@ def unpack_term_ast(ctx, ast):
 		)
 	raise NotImplementedError("Unhandled AST node: %r" % (ast.data,))
 
-for s in test_strings:
-	ctx = easy.Context()
-	print "Testing:", s
-	ast = term_parser.parse(s)
-	result = unpack_term_ast(ctx, ast)
-	print "Result:", result
-	print
+if __name__ == "__main__":
+	test_strings = [
+		"(x :: y)",
+		"forall x, A -> B",
+		"A -> B -> C",
+		# Unfortunately currently this one parses the x -> y part wrong.
+		"X -> forall a (b c : nat) T (e : T), x -> y",
+		"match x ~ as y return P with O => y | S x' => S (add x' y) end",
+	#	"fix add x y : nat ~ := match x with O => y | S x' => S (add x' y) end",
+	]
+
+	for s in test_strings:
+		ctx = easy.Context()
+		print "Testing:", s
+		ast = term_parser.parse(s)
+		result = unpack_term_ast(ctx, ast)
+		print "Result:", result
+		print
 

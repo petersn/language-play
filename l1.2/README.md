@@ -34,6 +34,12 @@ Terms are build out of the following ilks, with an example of each:
 * Fix (TODO): Speculative syntax: `(fix f (x : T) : (forall y : U . B) => z)`
 
   Represents a structurally recursive (i.e. primitive recursive) function, via a least fixed point over a definition.
+* Axiom: No syntax, can only be built via the vernacular `Axiom`, and potentially later an admit-style tactic.
+
+  Represents an opaque non-computational term that always infers to a particular type.
+* Hole: No syntax, is only used internally for representing types that have yet to be inferred, and for building unification instances.
+
+  If I one day have a separate "core" type theory then it won't include holes.
 
 ## Inductives
 

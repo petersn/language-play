@@ -4,6 +4,31 @@
 %import common.WS
 %ignore WS
 
+vernacular: single_vernacular*
+
+?single_vernacular: vernac_definition
+	| vernac_axiom
+	| vernac_inductive
+	| vernac_infer
+	| vernac_check
+	| vernac_eval
+
+vernac_definition: "Definition" IDENT typed_params optional_type_annotation ":=" term "."
+
+vernac_axiom: "Axiom" IDENT ":" term "."
+
+vernac_inductive: "Inductive" IDENT typed_params ":" term ":=" inductive_arms "."
+
+vernac_infer: "Infer" term "."
+
+vernac_check: "Check" term ":" term "."
+
+vernac_eval: "Eval" term "."
+
+inductive_arms:
+	| "|"? inductive_arm ("|" inductive_arm)*
+inductive_arm: IDENT typed_params ":" term
+
 ?term: application
 	| term2
 
@@ -37,10 +62,10 @@ as_term: "as" term
 in_term: "in" term
 return_term: "return" term
 
-fix: "fix" IDENT typed_params fix_type_annotation ":=" term
+fix: "fix" IDENT typed_params optional_type_annotation ":=" term
 
-fix_type_annotation: ":" term
-	| "~"
+optional_type_annotation: ":" term
+	|
 
 // There are several allowed cases.
 // We are allowed a single set of variables to be given a homogenous type with no parens.
@@ -48,7 +73,7 @@ fix_type_annotation: ":" term
 // We are also allowed as many groups as we want that either have an annotation and parens, or no annotation.
 // For example: "a (b c : nat) T (e : T)"
 typed_params: param_group
-	| hetero_group+
+	| hetero_group*
 untyped_param: IDENT
 param_group: IDENT+ ":" term
 ?hetero_group: untyped_param

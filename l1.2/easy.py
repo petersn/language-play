@@ -429,6 +429,30 @@ class Match(Term):
 		# Do the pattern matching!
 		raise NotImplementedError("Pattern matching not implemented yet.")
 
+class Axiom(Term):
+	def __init__(self, ty):
+		self.ty = ty
+
+	def key(self):
+		return self.ty
+
+	def __repr__(self):
+		return "<axiom : %s>" % (self.ty,)
+
+	def subst(self, x, y):
+		return self
+
+	def normalize(self, ctx, strategy):
+		# XXX: No need to normalize self.ty?
+		return self
+
+	def infer(self, ctx):
+		return self.ty
+
+	def free_vars(self):
+		# XXX: No need to recurse into self.ty?
+		return set()
+
 class Hole(Term):
 	def __init__(self, identifier=""):
 		assert isinstance(identifier, str)

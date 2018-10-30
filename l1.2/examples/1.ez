@@ -1,0 +1,12 @@
+# Simple example!
+
+Definition foo := Type0.
+
+Definition bar := Type1.
+
+Axiom x : foo.
+
+Eval x.
+
+Infer x.
+
