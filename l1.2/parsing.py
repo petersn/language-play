@@ -30,6 +30,16 @@ def unpack_typed_params(ctx, typed_params):
 			assert False
 	return results
 
+def wrap_with_typed_params(ctx, typed_params, term, mode):
+	assert mode in ("dependent_product", "abstraction")
+	typed_params = unpack_typed_params(ctx, typed_params)
+	for var, ty in typed_params[::-1]:
+		term = {
+			"dependent_product": easy.DependentProduct,
+			"abstraction": easy.Abstraction,
+		}[mode](var, ty, term)
+	return term
+
 def unpack_term_ast(ctx, ast):
 	# This is a binding of some sort.
 	if isinstance(ast, lark.lexer.Token):
@@ -39,17 +49,14 @@ def unpack_term_ast(ctx, ast):
 			return easy.SortType(universe_index)
 		if name == "Prop":
 			return easy.SortProp()
-		return easy.Var(str(ast))
+		# XXX: Make sure the name is bound!
+#		if not ctx.contains_def(easy.Var(name)) and not ctx.contains_ty(easy.Var(name)):
+#			raise ValueError("Unbound name: %s" % (name,))
+		return easy.Var(name)
 	if ast.data in ("dependent_product", "abstraction"):
 		typed_params, result_ty = ast.children
-		params = unpack_typed_params(ctx, typed_params)
 		result = unpack_term_ast(ctx, result_ty)
-		for var, ty in params[::-1]:
-			result = {
-				"dependent_product": easy.DependentProduct,
-				"abstraction": easy.Abstraction,
-			}[ast.data](var, ty, result)
-		return result
+		return wrap_with_typed_params(ctx, typed_params, result, ast.data)
 	if ast.data == "arrow":
 		A, B = [unpack_term_ast(ctx, child) for child in ast.children]
 		return easy.DependentProduct(easy.Var("!"), A, B)
@@ -59,6 +66,10 @@ def unpack_term_ast(ctx, ast):
 	if ast.data == "annotation":
 		x, ty = [unpack_term_ast(ctx, child) for child in ast.children]
 		return easy.Annotation(x, ty)
+	if ast.data == "constructor":
+		# XXX: Check name presense.
+		ind_name, con_name = map(str, ast.children)
+		return easy.ConstructorRef(ind_name, con_name)
 	if ast.data == "match":
 		ast_matchand, ast_extensions, ast_arms = ast.children
 		match_term = unpack_term_ast(ctx, ast_matchand)

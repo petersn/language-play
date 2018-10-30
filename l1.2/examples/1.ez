@@ -1,12 +1,25 @@
 # Simple example!
 
-Definition foo := Type0.
+Inductive nat : Type0 :=
+	| O : nat
+	| S : nat -> nat.
 
-Definition bar := Type1.
+Definition apply_twice := fun (T : Type0) (f : T -> T) (x : T) => (f (f x)).
 
-Axiom x : foo.
+Infer nat::S.
 
-Eval x.
+Infer nat.
 
-Infer x.
+Infer apply_twice.
+
+Eval apply_twice nat nat::S nat::O.
+
+Infer apply_twice nat nat::S.
+
+#Definition foo := Type0.
+#Definition bar := Type1.
+#Axiom x : foo.
+#Eval x.
+#Infer x.
+#Check x : foo.
 

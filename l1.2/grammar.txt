@@ -17,7 +17,7 @@ vernac_definition: "Definition" IDENT typed_params optional_type_annotation ":="
 
 vernac_axiom: "Axiom" IDENT ":" term "."
 
-vernac_inductive: "Inductive" IDENT typed_params ":" term ":=" inductive_arms "."
+vernac_inductive: "Inductive" IDENT typed_params ":" term ":=" inductive_constructors "."
 
 vernac_infer: "Infer" term "."
 
@@ -25,9 +25,9 @@ vernac_check: "Check" term ":" term "."
 
 vernac_eval: "Eval" term "."
 
-inductive_arms:
-	| "|"? inductive_arm ("|" inductive_arm)*
-inductive_arm: IDENT typed_params ":" term
+inductive_constructors:
+	| "|"? inductive_constructor ("|" inductive_constructor)*
+inductive_constructor: IDENT typed_params ":" term
 
 ?term: application
 	| term2
@@ -41,10 +41,11 @@ inductive_arm: IDENT typed_params ":" term
 	| abstraction
 	| match
 	| fix
+	| constructor
 	| IDENT
 	| "(" term ")"
 
-annotation: "(" term "::" term ")"
+annotation: "(" term "%%" term ")"
 
 dependent_product: "forall" typed_params "," term
 
@@ -55,7 +56,7 @@ abstraction: "fun" typed_params "=>" term
 
 application: term term2
 
-match: "match" term extensions? "with" match_cases "end"
+match: "match" term extensions? "with" match_arms "end"
 
 extensions: "~" as_term? in_term? return_term?
 as_term: "as" term
@@ -79,9 +80,11 @@ param_group: IDENT+ ":" term
 ?hetero_group: untyped_param
 	| "(" param_group ")"
 
-match_cases:
-	| "|"? match_case ("|" match_case)*
-match_case: term "=>" term
+match_arms:
+	| "|"? match_arm ("|" match_arm)*
+match_arm: term "=>" term
+
+constructor: IDENT "::" IDENT
 
 IDENT: /[a-zA-Z][a-zA-Z0-9_']*/
 

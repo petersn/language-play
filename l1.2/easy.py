@@ -33,6 +33,9 @@ class Context:
 		self.definitions = {}
 		self.inductives = {}
 
+	def __repr__(self):
+		return "<ctx: %s %s>" % (self.typings, self.definitions)
+
 	def copy(self):
 		new_ctx = Context()
 		new_ctx.typings = self.typings.copy()
@@ -56,17 +59,17 @@ class Context:
 		assert isinstance(var, Var)
 		return self.definitions[var]
 
-	def extend_ty(self, var, ty):
+	def extend_ty(self, var, ty, in_place=False):
 		assert isinstance(var, Var)
 		assert var not in self.definitions
-		ctx = self.copy()
+		ctx = self if in_place else self.copy()
 		ctx.typings[var] = ty
 		return ctx
 
-	def extend_def(self, var, term):
+	def extend_def(self, var, term, in_place=False):
 		assert isinstance(var, Var)
 		assert var not in self.typings
-		ctx = self.copy()
+		ctx = self if in_place else self.copy()
 		ctx.definitions[var] = term
 		return ctx
 
@@ -77,6 +80,11 @@ class Parameters:
 		assert all(isinstance(ty, Term) for ty in types)
 		self.names = names
 		self.types = types
+
+	def wrap_with_products(self, term):
+		for name, ty in zip(self.names, self.types)[::-1]:
+			term = DependentProduct(name, ty, term)
+		return term
 
 	def __repr__(self):
 		return " ".join(
@@ -106,6 +114,8 @@ class Inductive:
 		assert name not in ctx.inductives, "Cannot redefine inductive."
 		ctx.inductives[name] = self
 
+		self.computed_type = self.parameters.wrap_with_products(self.arity)
+
 	def check_arity(self, arity):
 		# A sort is always a valid arity.
 		if arity.is_sort():
@@ -128,7 +138,6 @@ class Inductive:
 class Term(HashableMixin):
 	def key(self): raise NotImplementedError
 	def __repr__(self): raise NotImplementedError
-	def subst(self, x, y): raise NotImplementedError
 	def normalize(self, ctx, strategy): raise NotImplementedError
 	def infer(self, ctx): raise NotImplementedError
 	def free_vars(self): raise NotImplementedError
@@ -138,6 +147,9 @@ class Term(HashableMixin):
 		inferred_type = self.infer(ctx)
 		if not compare_terms(ctx, inferred_type, ty):
 			raise TypeCheckFailure("Failure to match: %r != %r" % (inferred_type, ty))
+
+	def subst(self, x, y):
+		return self
 
 	def is_sort(self):
 		return False
@@ -164,7 +176,8 @@ class Annotation(Term):
 
 	def infer(self, ctx):
 		# XXX: This might not be right.
-		self.ty.check(ctx, SortType())
+		# XXX: Universe polymorphism missing!
+		self.ty.check(ctx, SortType(0))
 		self.term.check(ctx, self.ty), "Type annotation failed!"
 		return self.ty
 
@@ -186,14 +199,14 @@ class SortType(Term):
 		subscript_digits = {"%i" % (i,): "\xe2\x82" + chr(0x80 + i) for i in xrange(10)}
 		return "\xf0\x9d\x95\x8b%s" % ("".join(subscript_digits[c] for c in str(self.universe_index)),)
 
-	def subst(self, x, y):
-		return self
-
 	def normalize(self, ctx, strategy):
 		return self
 
 	def infer(self, ctx):
-		return SortType(self.universe_index + 1)
+		# XXX: FIXME: I'm currently overriding the predicativity of the Type universes!
+		# This opens up Girard's paradox, but I don't care for right now.
+		return SortType(0)
+#		return SortType(self.universe_index + 1)
 
 	def check(self, ctx, ty):
 		if ty != self:
@@ -211,10 +224,11 @@ class SortProp(SortType):
 
 	def infer(self, ctx):
 		# Implement Prop : Type
-		return SortType()
+		return SortType(0)
 
 class Var(Term):
 	def __init__(self, var):
+		assert isinstance(var, str)
 		self.var = var
 
 	def key(self):
@@ -236,7 +250,12 @@ class Var(Term):
 		return self
 
 	def infer(self, ctx):
-		return ctx.lookup_ty(self)
+		if ctx.contains_ty(self):
+			return ctx.lookup_ty(self)
+		elif ctx.contains_def(self):
+			return ctx.lookup_def(self).infer(ctx)
+		print "BAD CONTEXT:", ctx
+		raise RuntimeError("Unbound variable: %r" % (self,))
 
 	def free_vars(self):
 		return set([self])
@@ -274,8 +293,9 @@ class DependentProduct(Term):
 
 	def infer(self, ctx):
 		# Check all the types.
-		self.var_ty.check(ctx, SortType())
-		return SortType()
+		# XXX: Universe polymorphism needed here!
+		self.var_ty.check(ctx, SortType(0))
+		return SortType(0)
 
 	def check(self, ctx, ty):
 		return self.infer(ctx) == ty
@@ -309,7 +329,8 @@ class Abstraction(Term):
 #		return Abstraction(self.var, self.var_ty.normalize(ctx, strategy), self.result.normalize(ctx, strategy))
 
 	def infer(self, ctx):
-		self.var_ty.check(ctx, SortType())
+		# XXX: Universe polymorphism needed here!
+		self.var_ty.check(ctx, SortType(0))
 		ctx = ctx.extend_ty(self.var, self.var_ty)
 		u = self.result.infer(ctx)
 		# XXX: Do I need to abstract over self.var somehow?
@@ -353,7 +374,26 @@ class Application(Term):
 	def free_vars(self):
 		return self.fn.free_vars() | self.arg.free_vars()
 
-class InductiveConstructor(Term):
+class InductiveRef(Term):
+	def __init__(self, name):
+		self.name = name
+
+	def key(self):
+		return self.name
+
+	def __repr__(self):
+		return "%%%s" % (self.name,)
+
+	def normalize(self, ctx, strategy):
+		return self
+
+	def infer(self, ctx):
+		return ctx.inductives[self.name].computed_type
+
+	def free_vars(self, ctx):
+		return set()
+
+class ConstructorRef(Term):
 	def __init__(self, name, con_name):
 		self.name = name
 		self.con_name = con_name
@@ -362,11 +402,7 @@ class InductiveConstructor(Term):
 		return self.name, self.con_name
 
 	def __repr__(self):
-		return self.con_name
-#		return "@%s.%s" % (self.name, self.con_name)
-
-	def subst(self, x, y):
-		return self
+		return "%s::%s" % (self.name, self.con_name)
 
 	def normalize(self, ctx, strategy):
 		return self
@@ -417,7 +453,7 @@ class Match(Term):
 		# Here's where we do complicated stuff!
 		matchand = self.matchand.normalize(ctx, strategy)
 		head, args = extract_app_spine(matchand)
-		if not isinstance(head, InductiveConstructor):
+		if not isinstance(head, ConstructorRef):
 			# XXX: TODO: If we're evaluating CBV we should reduce some of the other terms too.
 			return Match(
 				matchand,
@@ -548,7 +584,7 @@ class AlphaCanonicalizer:
 				self.canonicalize(t.fn),
 				self.canonicalize(t.arg),
 			)
-		elif isinstance(t, (SortType, SortProp, InductiveConstructor)):
+		elif isinstance(t, (SortType, SortProp, ConstructorRef)):
 			return t
 		raise NotImplementedError("Unhandled: %r" % (t,))
 

@@ -1,12 +1,11 @@
 # Simple CiC implementation
 
+Simple implementation of a Calculus of Inductive Constructions based type-checker using bidirectional type-checking.
+
 ## Term language
 
-Terms are build out of the following ilks, with an example of each:
+Terms are build out of the following 13 ilks, with an example of each:
 
-* Annotation: `(x : t)`
-
-  Statically asserts that a given term has a given type, and also switches inference over to checking.
 * SortType: `Type2`
 
   Represents a single universe in the naturally-indexed hierarchy of predicative type universes.
@@ -16,24 +15,36 @@ Terms are build out of the following ilks, with an example of each:
 * Var: `abc`
 
   Represents a reference to either a global inductive or definition by name, or a variable bound lexically by one of: DependentProduct, Abstraction, Match (inside of a pattern's result), or Fix (bound to the recursive function name).
-* DependentProduct: `(forall x : T . U)`
+* DependentProduct: `forall x : T, U`
 
   Represents a dependent product type (i.e. function type).
-* Abstraction: `(fun x : T . y)`
+* Abstraction: `fun x : T => y`
 
   Represents a lambda term.
-* Application: `(f x)`
+* Application: `f x`
 
-  Represents the application of a term that has a DependentProduct type (a function) to an argument. For example, `f` could be an Abstraction or an InductiveConstructor.
-* InductiveConstructor: `@nat.S`
+  Represents the application of a term that has a DependentProduct type (a function) to an argument. For example, `f` could be an Abstraction, InductiveRef, or ConstructorRef.
+* InductiveRef: `nat`
 
-  Represents a reference to a particular constructor of a global inductive.
-* Match: `match t as x in ((I y1) y2) return P with | (@I.foo v) => v end`
+  Represents a reference to a particular global inductive.
+  This term ilk never occurs in the desugarer's output; it only occurs in the context binding an inductive's name to a ref to the given inductive, so that Vars can resolve to when invoking infer/check/normalize.
+  That is to say, if you write `nat` in your code it will become a Var which will resolve to an InductiveRef later.
+* ConstructorRef: `nat::S`
+
+  Represents a reference to a particular constructor of a particular global inductive.
+  Unlike an InductiveRef this ilk is actually separate syntax and is resolved as such by the parsing/desugaring stage.
+* Match: `match t ~ as x in I y1 y2 return P with I::foo a => a | I::bar a b => b end`
 
   Represents a (dependent) pattern match on a given term.
-* Fix (TODO): Speculative syntax: `(fix f (x : T) : (forall y : U . B) => z)`
+  For a basic match use the syntax `match t with ... end`.
+  If you need to specify any of the `as`, `in`, or `return` extensions then you must place a `~` after the matchand, as shown above.
+* Fix (TODO): Speculative syntax: `fix f (x : T) : (forall y : U, B) => z`
 
   Represents a structurally recursive (i.e. primitive recursive) function, via a least fixed point over a definition.
+* Annotation: `(x %% t)`
+
+  Statically asserts that a given term has a given type, and also switches inference over to checking.
+  The syntax is a little idiosyncratic compared to the obvious `(x : t)` syntax one might expect because I'm trying to make sure that I don't accidentally introduce ambiguity into my grammar and mess myself up during development.
 * Axiom: No syntax, can only be built via the vernacular `Axiom`, and potentially later an admit-style tactic.
 
   Represents an opaque non-computational term that always infers to a particular type.
@@ -43,7 +54,7 @@ Terms are build out of the following ilks, with an example of each:
 
 ## Inductives
 
-Inductives can also be defined, and are always defined via the following vernacular syntax (not yet implemented):
+Inductives can also be defined, and are always defined via the following vernacular syntax:
 
 ```
 Inductive example params : Ar :=
