@@ -38,7 +38,7 @@ Terms are build out of the following 13 ilks, with an example of each:
   Represents a (dependent) pattern match on a given term.
   For a basic match use the syntax `match t with ... end`.
   If you need to specify any of the `as`, `in`, or `return` extensions then you must place a `~` after the matchand, as shown above.
-* Fix (TODO): Speculative syntax: `fix f (x : T) : (forall y : U, B) => z`
+* Fix: `fix F (x : T) : (forall y : U, B) := z`
 
   Represents a structurally recursive (i.e. primitive recursive) function, via a least fixed point over a definition.
 * Annotation: `(x %% t)`
@@ -51,6 +51,11 @@ Terms are build out of the following 13 ilks, with an example of each:
 * Hole: No syntax, is only used internally for representing types that have yet to be inferred, and for building unification instances.
 
   If I one day have a separate "core" type theory then it won't include holes.
+
+It might seem that I'm missing let-in, but I think that let-in can be implemented as sugar.
+In Hindley-Milner let-in is critical because `x` gets a polytype, and therefore can be used polymorphically in z (so called "let polymorphism"), while such typing polymorphism is undecidable if we used the rewrite `let x := y in z` -> `(fun x => z) y`.
+However, in CiC HM-style polytypes don't exist, and we instead have depenently type-parameterized functions like `id : forall T : Type -> T -> T`, and therefore I think the above desugaring rewrite is unproblematic?
+I also don't think it's important for universe polymorphism because we can always just assign `x` a universe index that's high enough to cover every usage in `z`?
 
 ## Inductives
 
