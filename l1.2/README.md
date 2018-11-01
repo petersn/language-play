@@ -75,14 +75,22 @@ Each constructor's type must also be a sequence of nested dependent products, ul
 For example, in the above case of `params` and `Ar` specified we would need every constructor's type to ultimately terminate in a term of the form `((((example x) y) u1) u2)` where `u1 : T` and `u2 : (f u1)`.
 There are a bunch of other (mostly currently unimplemented) restrictions on the various types (e.g. positivity checking) required for soundness.
 
-## Match
-
-TODO: Even begin to understand the typing rules for a match. :(
-
 ## Fixpoints
 
 The Fix term enables us to write structurally recursive functions.
 TODO: Implement normalization and typing for Fix, and a checker for primitive recursion (required for soundness).
+
+## Current blatant sources of unsoundness
+
+* `Type0 : Type0`, because I'm being lazy and not implementing anything like universe cumulativity, nor any features towards universe polymorphism.
+  Later I will think hard about how I want to handle cumulativity/universe polymorphism, and will dodge Girard's paradox by setting `Type{i} : Type{i+1}`.
+* No positivity checking is done on inductive definitions.
+* Currently definitions can be unconstrainedly recursive!
+  I think this only affects normalization (i.e. results in non-termination/divergence), and not the actual type checking, so I'm not sure this results in true unsoundness in the sense of inhabiting ⊥, but it's still bad, and can make type checking ill-formed definitions hang.
+* There is no primitive recursiveness checking on fix, so we have unsoundness via `(fix f (x : ⊥) : ⊥ := f x) : ⊥`.
+* There are probably *tons* of bugs, especially because I'm currently stupidly lax about allowing unbound variables which might accidentally get captured by substitutions.
+  I would be stunned if there aren't at least half a dozen such bugs yielding unsoundness right now.
+  Later I'm going to force all variables to be bound at parse-time, and maybe switch over to de Bruijn indices.
 
 ## Papers
 
