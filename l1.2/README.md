@@ -91,6 +91,7 @@ TODO: Implement normalization and typing for Fix, and a checker for primitive re
 * There are probably *tons* of bugs, especially because I'm currently stupidly lax about allowing unbound variables which might accidentally get captured by substitutions.
   I would be stunned if there aren't at least half a dozen such bugs yielding unsoundness right now.
   Later I'm going to force all variables to be bound at parse-time, and maybe switch over to de Bruijn indices.
+* Match is still unrestricted on `Prop`, which yields unsoundness due to the impredicativity of `Prop`.
 
 ## Papers
 
