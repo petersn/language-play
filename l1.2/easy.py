@@ -29,10 +29,21 @@ class TypeCheckFailure(Exception):
 	pass
 
 class Context:
+	class WithHandler:
+		def __init__(self, this):
+			self.this = this
+
+		def __enter__(self):
+			self.this.depth += 1
+
+		def __exit__(self, ty, value, traceback):
+			self.this.depth -= 1
+
 	def __init__(self):
 		self.typings = {}
 		self.definitions = {}
 		self.inductives = {}
+		self.depth = 0
 
 	def __repr__(self):
 		return "<ctx: %s %s>" % (self.typings, self.definitions)
@@ -42,7 +53,14 @@ class Context:
 		new_ctx.typings = self.typings.copy()
 		new_ctx.definitions = self.definitions.copy()
 		new_ctx.inductives = self.inductives.copy()
+		new_ctx.depth = self.depth
 		return new_ctx
+
+	def prefix(self):
+		return "  " * self.depth
+
+	def depth_scope(self):
+		return Context.WithHandler(self)
 
 	def contains_ty(self, var):
 		assert isinstance(var, Var)
@@ -62,6 +80,7 @@ class Context:
 
 	def extend_ty(self, var, ty, in_place=False):
 		assert isinstance(var, Var)
+		assert isinstance(ty, Term)
 		assert var not in self.definitions
 		ctx = self if in_place else self.copy()
 		ctx.typings[var] = ty
@@ -69,6 +88,7 @@ class Context:
 
 	def extend_def(self, var, term, in_place=False):
 		assert isinstance(var, Var)
+		assert isinstance(term, Term)
 		assert var not in self.typings
 		ctx = self if in_place else self.copy()
 		ctx.definitions[var] = term
@@ -82,10 +102,22 @@ class Parameters:
 		self.names = names
 		self.types = types
 
-	def wrap_with_products(self, term):
+	def wrap_with(self, term, wrapper):
 		for name, ty in zip(self.names, self.types)[::-1]:
-			term = DependentProduct(name, ty, term)
+			term = wrapper(Var(name), ty, term)
 		return term
+
+	def wrap_with_products(self, term):
+		return self.wrap_with(term, DependentProduct)
+
+	def wrap_with_abstractions(self, term):
+		return self.wrap_with(term, Abstraction)
+
+	def extend_context_with_typing(self, ctx):
+		ctx = ctx.copy()
+		for name, ty in zip(self.names, self.types):
+			ctx = ctx.extend_ty(Var(name), ty, in_place=True)
+		return ctx
 
 	def __repr__(self):
 		return " ".join(
@@ -125,6 +157,9 @@ class Inductive:
 		self.check_arity(arity.result_ty)
 
 	def add_constructor(self, con_name, ty):
+		# XXX: Here's the really weird rule about how parameters wrap every constructor with products.
+		# I think this is right? It's really hard to find a description online that's clear.
+		ty = self.parameters.wrap_with_products(ty)
 		self.constructors[con_name] = Inductive.Constructor(ty)
 		# XXX: TODO: Check positivity!
 		# This is necessary for consistency!
@@ -140,14 +175,24 @@ class Term(HashableMixin):
 	def key(self): raise NotImplementedError
 	def __repr__(self): raise NotImplementedError
 	def normalize(self, ctx, strategy): raise NotImplementedError
-	def infer(self, ctx): raise NotImplementedError
 	def free_vars(self): raise NotImplementedError
 	# If you're implementing a subclass also add handling to AlphaCanonicalizer.
 
+	def infer(self, ctx):
+		# NB: It might be helpful to add ctx.typings.keys(), ctx.definitions.keys() to the debug printing.
+		print ctx.prefix() + "?", self
+		with ctx.depth_scope():
+			ty = self.do_infer(ctx)
+		print ctx.prefix() + "=", ty
+		return ty
+
 	def check(self, ctx, ty):
-		inferred_type = self.infer(ctx)
-		if not compare_terms(ctx, inferred_type, ty):
-			raise TypeCheckFailure("Failure to match: %r != %r" % (inferred_type, ty))
+		print ctx.prefix() + "Check:", self, ":", ty
+		with ctx.depth_scope():
+			inferred_type = self.infer(ctx)
+			if not compare_terms(ctx, inferred_type, ty):
+				raise TypeCheckFailure("Failure to match: %r != %r" % (inferred_type, ty))
+		print ctx.prefix() + "Pass!"
 
 	def subst(self, x, y):
 		return self
@@ -175,14 +220,14 @@ class Annotation(Term):
 			self.ty.normalize(ctx, strategy),
 		)
 
-	def infer(self, ctx):
+	def do_infer(self, ctx):
 		# XXX: This might not be right.
 		# XXX: Universe polymorphism missing!
 		self.ty.check(ctx, SortType(0))
 		self.term.check(ctx, self.ty), "Type annotation failed!"
 		return self.ty
 
-	def free_vars(self, ctx):
+	def free_vars(self):
 		# XXX: Should the annotation be included in free variables?
 		# Hmm...
 		return self.term.free_vars() | self.ty.free_vars()
@@ -203,7 +248,7 @@ class SortType(Term):
 	def normalize(self, ctx, strategy):
 		return self
 
-	def infer(self, ctx):
+	def do_infer(self, ctx):
 		# XXX: FIXME: I'm currently overriding the predicativity of the Type universes!
 		# This opens up Girard's paradox, but I don't care for right now.
 		return SortType(0)
@@ -220,10 +265,16 @@ class SortType(Term):
 		return True
 
 class SortProp(SortType):
+	def __init__(self):
+		pass
+
+	def key(self):
+		return
+
 	def __repr__(self):
 		return "\xe2\x84\x99"
 
-	def infer(self, ctx):
+	def do_infer(self, ctx):
 		# Implement Prop : Type
 		return SortType(0)
 
@@ -245,12 +296,12 @@ class Var(Term):
 
 	def normalize(self, ctx, strategy):
 		if ctx.contains_def(self):
-			return ctx.lookup_def(self)
+			return ctx.lookup_def(self).normalize(ctx, strategy)
 		# XXX: This should be an error!
 		# We need a separate atom type soon.
 		return self
 
-	def infer(self, ctx):
+	def do_infer(self, ctx):
 		if ctx.contains_ty(self):
 			return ctx.lookup_ty(self)
 		elif ctx.contains_def(self):
@@ -292,11 +343,17 @@ class DependentProduct(Term):
 		return self
 #		return DependentProduct(self.var, self.var_ty.normalize(ctx, strategy), self.res_ty.normalize(ctx, strategy))
 
-	def infer(self, ctx):
+	def do_infer(self, ctx):
 		# Check all the types.
 		# XXX: Universe polymorphism needed here!
-		self.var_ty.check(ctx, SortType(0))
-		return SortType(0)
+		# XXX: Is inference here rather than checking problematic?
+		var_ty = self.var_ty.infer(ctx)
+		assert var_ty.is_sort()
+#		self.var_ty.check(ctx, SortType(0))
+		result_sort = self.result_ty.infer(ctx.extend_ty(self.var, self.var_ty))
+		assert result_sort.is_sort()
+		# XXX: Deal with universes appropriately here.
+		return result_sort #SortType(0)
 
 	def check(self, ctx, ty):
 		return self.infer(ctx) == ty
@@ -340,9 +397,11 @@ class Abstraction(Term):
 		return self
 #		return Abstraction(self.var, self.var_ty.normalize(ctx, strategy), self.result.normalize(ctx, strategy))
 
-	def infer(self, ctx):
+	def do_infer(self, ctx):
 		# XXX: Universe polymorphism needed here!
-		self.var_ty.check(ctx, SortType(0))
+		var_sort = self.var_ty.infer(ctx)
+		assert var_sort.is_sort()
+#		self.var_ty.check(ctx, SortType(0))
 		ctx = ctx.extend_ty(self.var, self.var_ty)
 		u = self.result.infer(ctx)
 		# XXX: Do I need to abstract over self.var somehow?
@@ -377,7 +436,7 @@ class Application(Term):
 		instantiation = fn.result.subst(fn.var, arg)
 		return instantiation.normalize(ctx, strategy)
 
-	def infer(self, ctx):
+	def do_infer(self, ctx):
 		fn_type = self.fn.infer(ctx)
 		fn_type = coerce_to_product(ctx, fn_type)
 		self.arg.check(ctx, fn_type.var_ty)
@@ -399,10 +458,10 @@ class InductiveRef(Term):
 	def normalize(self, ctx, strategy):
 		return self
 
-	def infer(self, ctx):
+	def do_infer(self, ctx):
 		return ctx.inductives[self.name].computed_type
 
-	def free_vars(self, ctx):
+	def free_vars(self):
 		return set()
 
 class ConstructorRef(Term):
@@ -419,14 +478,68 @@ class ConstructorRef(Term):
 	def normalize(self, ctx, strategy):
 		return self
 
-	def infer(self, ctx):
+	def do_infer(self, ctx):
 		return self.get_inductive(ctx).constructors[self.con_name].ty
 
-	def free_vars(self, ctx):
+	def free_vars(self):
 		return set()
 
 	def get_inductive(self, ctx):
 		return ctx.inductives[self.name]
+
+class Fix(Term):
+	def __init__(self, recursive_name, params, ty, body):
+		assert isinstance(recursive_name, str)
+		assert isinstance(params, Parameters)
+		assert isinstance(ty, Term)
+		assert isinstance(body, Term)
+		self.recursive_var = Var(recursive_name)
+		self.params = params
+		self.ty = ty
+		self.body = body
+
+	def key(self):
+		return self.recursive_var, self.params, self.ty, self.body
+
+	def __repr__(self):
+		return "fix %s %s : %s := %s" % (
+			self.recursive_var,
+			self.params,
+			self.ty,
+			self.body,
+		)
+
+	def normalize(self, ctx, strategy):
+		# XXX: FIXME: The current strategy here is to eta-expand one level of the Fix.
+		# This is a *terrible* solution, and probably just doesn't work.
+		# An unapplied Fix should be considered to in normal form already.
+		# We need to extend Application to know about a Fix.
+		function_term = self.params.wrap_with_abstractions(self.body)
+		# XXX: The following extend_def is totally bogus and does nothing.
+#		# Give a reference to the recursive Fix to our child.
+#		ctx = ctx.extend_def(self.recursive_var, self)
+		print "Function term:", function_term
+		return function_term.normalize(ctx, strategy)
+
+	def overall_type(self, ctx):
+		return self.params.wrap_with_products(self.ty)
+
+	def do_infer(self, ctx):
+		# XXX: FIXME: No primitive recursiveness checking yet!
+		# This makes the theory trivially unsound via: (fix f (x : False) : False := f x) : False
+
+		overall_type = self.overall_type(ctx)
+
+		# Build our recursive context in which self.recursive_var is assumed to have the right fixed type.
+		ctx = ctx.extend_ty(self.recursive_var, overall_type)
+		# Also assume our arguments have the given types.
+		ctx = self.params.extend_context_with_typing(ctx)
+		# Now check that our result has the right type.
+		self.body.check(ctx, self.ty)
+		return overall_type
+
+	def free_vars(self):
+		return set()
 
 class Match(Term):
 	class Arm(HashableMixin):
@@ -519,13 +632,30 @@ class Match(Term):
 
 		raise ValueError("Sanity-check failure: How did our supposedly well-formed match fail to be exhaustive?")
 
-	def infer(self, ctx):
-		pass
+	def get_return_type(self, ctx):
+		if self.return_term != Hole():
+			return self.return_term
+		# If our return type is Hole then infer from our first arm.
+		# XXX: Later when we have no arms instead infer our return type as False.
+		return self.arms[0].result.infer(ctx)
 
-	def free_vars(self, ctx):
+	def do_infer(self, ctx):
+		return_ty = self.get_return_type(ctx)
+		# First check that (matchand : I pars t_1 ... t_p)
+		# Where pars are our parameters, and the t_1 through t_p saturate the arity.
+		matchand_ty = self.matchand.infer(ctx).normalize(ctx, EvalStrategy.WHNF)
+		matchand_ty_head, matchand_ty_args = extract_app_spine(matchand_ty)
+		assert isinstance(matchand_ty_head, InductiveRef), "Bad matchand type: %s" % (matchand_ty,)
+		# Extract the parameters and arity-parameters of the indutive.
+		# XXX: FIXME: Various other checks are required!
+		# Also, dependent matching isn't implemented appropriately: I still need to apply substitutionss on the return type.
+		return self.get_return_type(ctx) #self.return_term
+#		return SortType(7)
+
+	def free_vars(self):
 		# XXX: This is probably wrong, as the as_term and in_term parts form bindings that should eliminate free variables from the return_term part.
 		root_free = reduce(lambda x, y: x | y, [
-			i.free_vars(ctx)
+			i.free_vars()
 			for i in [self.matchand, self.as_term, self.in_term, self.return_term]
 		])
 		arms_free = set()
@@ -550,7 +680,7 @@ class Axiom(Term):
 		# XXX: No need to normalize self.ty?
 		return self
 
-	def infer(self, ctx):
+	def do_infer(self, ctx):
 		return self.ty
 
 	def free_vars(self):
@@ -574,7 +704,7 @@ class Hole(Term):
 	def normalize(self, ctx, strategy):
 		return self
 
-	def infer(self, ctx):
+	def do_infer(self, ctx):
 		raise NotImplementedError("Type inference cannot currently handle holes.")
 
 	def free_vars(self):
@@ -662,6 +792,37 @@ def alpha_canonicalize(term):
 
 def alpha_equivalent(t1, t2):
 	return alpha_canonicalize(t1) == alpha_canonicalize(t2)
+
+"""
+class HoleFiller:
+	def fill(self, t):
+		assert isinstance(t, Term), "Bad object: %r (%r)" % (t, type(t))
+		if isinstance(t, (Var, InductiveRef, ConstructorRef)):
+			# These nodes need no further processing.
+			pass
+		elif isinstance(t, Annotation):
+			self.fill(t.term)
+			self.fill(t.ty)
+		elif isinstance(t, (DependentProduct, Abstraction)):
+			self.fill(t.var)
+			self.fill(t.var_ty)
+			if isinstance(t, DependentProduct):
+				self.fill(t.result_ty)
+			else:
+				self.fill(t.result)
+		elif isinstance(t, Abstraction):
+			self.fill(t.fn)
+			self.fill(t.arg)
+		elif isinstance(t, Match):
+			if t.return_term == Hole:
+				# XXX: Here I'm assuming the match has at least one arm.
+				# Once I have a canonical False type then infer False if there are no arms.
+				t.return_term = t.arms[0].infer
+		elif isinstance(t, Hole):
+			raise ValueError("HoleFiller reached a hole it can't fill!")
+		else:
+			raise NotImplementedError("Unhandled: %r" % (t,))
+"""
 
 parse = easy_parse.parse_term
 

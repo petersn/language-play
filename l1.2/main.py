@@ -32,12 +32,7 @@ def vernac_inductive(context, vernac):
 	name, typed_params, arity, constructors = vernac.children
 
 	# Unpack the typed_params into the inductive's parameters.
-	typed_params = parsing.unpack_typed_params(context, typed_params)
-	names, types = [], []
-	for n, t in typed_params:
-		names.append(n)
-		types.append(t)
-	parameters = easy.Parameters(names, types)
+	parameters = parsing.unpack_typed_params_to_Parameters(context, typed_params)
 
 	arity = parsing.unpack_term_ast(context, arity)
 	ind = easy.Inductive(
@@ -73,9 +68,10 @@ def vernac_infer(context, vernac):
 def vernac_check(context, vernac):
 	term, ty = [parsing.unpack_term_ast(context, i) for i in vernac.children]
 	try:
+		print "Vernac check:", term, ":", ty
 		term.check(context, ty)
 		print "Successful type check: %s : %s" % (term, ty)
-	except Exception, e:
+	except easy.TypeCheckFailure, e:
 		print "Type check failure:", e
 
 @vernacular_handler("vernac_eval")

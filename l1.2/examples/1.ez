@@ -1,28 +1,76 @@
 # Simple example!
 
+#Inductive True : Prop := I : True.
+#Inductive False : Prop := .
+
+#Definition explosion (x : False) (p : Prop) := match x ~ return p with end.
+#Check explosion : False -> forall p : Prop, p.
+
 Inductive nat : Type0 :=
 	| O : nat
 	| S : nat -> nat.
 
-Definition apply_twice := fun (T : Type0) (f : T -> T) (x : T) => (f (f x)).
+#Definition add :=
+#	fix F (x : nat) (y : nat) : nat :=
+#		match x with
+#		| nat::O => y
+#		| nat::S x' => F x' (nat::S y)
+#		end.
 
-Infer nat::S.
+#Eval add (nat::S (nat::S nat::O)) (nat::S nat::O).
 
-Infer nat.
+#Definition apply_twice := fun (T : Type0) (f : T -> T) (x : T) => (f (f x)).
 
-Infer apply_twice.
+#Infer nat::S.
+#Infer nat.
+#Infer apply_twice.
+#Eval apply_twice nat nat::S nat::O.
+#Infer apply_twice nat nat::S.
+#Infer apply_twice nat (apply_twice nat nat::S).
+#Eval apply_twice nat (apply_twice nat nat::S) nat::O.
+#Definition pred (x : nat) := match x with nat::O => nat::O | nat::S x' => x' end.
+#Eval pred (nat::S (nat::S nat::O)).
+#Eval pred.
 
-Eval apply_twice nat nat::S nat::O.
+#Definition nat_ind_type' := forall P : (nat -> Prop),
+#	(
+#		forall n : nat, (P n)
+#	).
+#Axiom simple_axiom : nat_ind_type'.
+#Definition nat_ind' :=
+#	fun
+#		(P : nat -> Prop)
+#		=>
+#		simple_axiom P n.
 
-Infer apply_twice nat nat::S.
+#Eval nat_ind_type'.
+#Infer nat_ind_type'.
 
-Infer apply_twice nat (apply_twice nat nat::S).
+# ===== Proving nat_ind via a fix and a match =====
 
-Eval apply_twice nat (apply_twice nat nat::S) nat::O.
+# This looks horrific, but parses correctly right now.
+# TODO: Make the parser not insanely awful.
+Definition nat_ind_type := forall P : (nat -> Prop), ((P nat::O) -> ((forall n : nat, ((P n) -> (P (nat::S n)))) -> forall n : nat, (P n))).
 
-Definition pred x : nat := match x with nat::O => nat::O | nat::S x' => x' end.
+#Eval nat_ind_type.
+#Infer nat_ind_type.
 
-Eval pred (nat::S (nat::S nat::O)).
+Definition nat_ind :=
+	fun
+		(P : nat -> Prop)
+		(H : P nat::O)
+		(f0 : (forall n : nat, ((P n) -> (P (nat::S n))))) =>
+	fix F (n : nat) : P n :=
+		match n ~ as n0 return (P n0) with
+		| nat::O => H
+		| nat::S n0 => f0 n0 (F n0)
+		end.
+
+Eval o___________________________________________.
+
+Check nat_ind : nat_ind_type.
+
+#Infer pred.
 
 #Definition foo := Type0.
 #Definition bar := Type1.

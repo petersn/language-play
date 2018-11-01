@@ -30,6 +30,14 @@ def unpack_typed_params(ctx, typed_params):
 			assert False
 	return results
 
+def unpack_typed_params_to_Parameters(ctx, typed_params):
+	typed_params = unpack_typed_params(ctx, typed_params)
+	names, types = [], []
+	for n, t in typed_params:
+		names.append(n.var)
+		types.append(t)
+	return easy.Parameters(names, types)
+
 def wrap_with_typed_params(ctx, typed_params, term, mode):
 	assert mode in ("dependent_product", "abstraction")
 	typed_params = unpack_typed_params(ctx, typed_params)
@@ -39,6 +47,12 @@ def wrap_with_typed_params(ctx, typed_params, term, mode):
 			"abstraction": easy.Abstraction,
 		}[mode](var, ty, term)
 	return term
+
+def unpack_optional_type_annotation(ctx, annot):
+	if not annot.children:
+		return easy.Hole()
+	annot_ty_ast, = annot.children
+	return unpack_term_ast(ctx, annot_ty_ast)
 
 def unpack_term_ast(ctx, ast):
 	# This is a binding of some sort.
@@ -98,6 +112,17 @@ def unpack_term_ast(ctx, ast):
 			extensions["in"],
 			extensions["return"],
 			arms,
+		)
+	if ast.data == "fix":
+		name, typed_params, optional_type_annotation, body = ast.children
+		parameters = unpack_typed_params_to_Parameters(ctx, typed_params)
+		return_ty = unpack_optional_type_annotation(ctx, optional_type_annotation)
+		body = unpack_term_ast(ctx, body)
+		return easy.Fix(
+			str(name),
+			parameters,
+			return_ty,
+			body,
 		)
 	raise NotImplementedError("Unhandled AST node: %r" % (ast.data,))
 
