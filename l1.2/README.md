@@ -92,6 +92,12 @@ Using the following resources:
 * [(How to implement type theory) in an hour](http://math.andrej.com/2018/08/25/how-to-implement-type-theory-in-an-hour/)
 * [Bidirectional Typing Rules: A Tutorial](http://davidchristiansen.dk/tutorials/bidirectional.pdf)
 
+Some additional resources I haven't really incorporated yet:
+
+* [https://github.com/jozefg/higher-order-unification](https://github.com/jozefg/higher-order-unification)
+* [Inductive Definitions in the System Coq: Rules and Properties](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.32.5387&rep=rep1&type=pdf)
+* [Inductive Families](http://www.cse.chalmers.se/~peterd/papers/Inductive_Families.pdf)
+
 ## TODO
 
 * Make it actually work, and be even remotely confident in soundness.
