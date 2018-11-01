@@ -57,7 +57,7 @@ class Context:
 		return new_ctx
 
 	def prefix(self):
-		return "  " * self.depth
+		return " " * (2 * self.depth + 2)
 
 	def depth_scope(self):
 		return Context.WithHandler(self)
@@ -682,7 +682,6 @@ class Match(Term):
 		assert len(in_args) == len(arity_tys), "Extended match's in term must have exactly the same number of arguments as number of arguments in the inductive's arity (not its parameters!)"
 
 		as_term_type = form_app_spine(form_app_spine(matchand_ty_head, pars), in_args)
-		print "As term type:", as_term_type
 		# We now have formed as_term_type = (I pars y_1 ... y_p)
 
 		# We now need to extract the types for each of the named parameters in the in_term.

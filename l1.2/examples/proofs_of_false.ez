@@ -1,0 +1,29 @@
+# My theory is currently very unsound due to a bunch of unimplemented checks.
+# Here I categorize some of my current proofs of False.
+
+Inductive True : Prop := I : True.
+Inductive False : Prop := .
+
+# === Explosion, proving the significance of False.
+
+Definition efq_proof (f : False) (P : Prop) := match f ~ as x return P with end.
+Check efq_proof : False -> forall P : Prop, P.
+
+# === Recursive definition.
+
+# This doesn't currently cause False to be inhabited, but it does crash infer.
+# Definition bad_rec (x : True) : False := rec x.
+# Infer bad_rec True::I.
+
+# === Recursive fix.
+# To correct this issue I have to implement primitive recursion checking in Fix.infer().
+
+Definition bad_fix := fix F (x : True) : False := (F x).
+Infer bad_fix True::I.
+
+# === Girard's paradox.
+
+Definition P (U : Type0) := U -> Type0.
+
+# TODO: Understand Girard's paradox.
+
