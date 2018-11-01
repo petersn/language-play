@@ -53,8 +53,9 @@ Terms are build out of the following 13 ilks, with an example of each:
   If I one day have a separate "core" type theory then it won't include holes.
 
 It might seem that I'm missing let-in, but I think that let-in can be implemented as sugar.
-In Hindley-Milner let-in is critical because `x` gets a polytype, and therefore can be used polymorphically in z (so called "let polymorphism"), while such typing polymorphism is undecidable if we used the rewrite `let x := y in z` -> `(fun x => z) y`.
-However, in CiC HM-style polytypes don't exist, and we instead have depenently type-parameterized functions like `id : forall T : Type -> T -> T`, and therefore I think the above desugaring rewrite is unproblematic?
+In Hindley-Milner let-in is critical because in `let x := y in z` we derive a polytype for `x`, and therefore `x` can be used polymorphically in `z` (so called "let polymorphism").
+Such typing polymorphism is undecidable if we used the rewrite `let x := y in z` -> `(fun x => z) y`, and then wanted to let the lambda take a polytype.
+However, in CiC HM-style polytypes don't exist, and we instead have depenently type-parameterized functions like `id : forall T : Type, T -> T`, and therefore I think the above desugaring rewrite is unproblematic?
 I also don't think it's important for universe polymorphism because we can always just assign `x` a universe index that's high enough to cover every usage in `z`?
 
 ## Inductives
