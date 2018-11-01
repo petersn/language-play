@@ -163,15 +163,31 @@ class Inductive:
 	def check_arity(self, arity):
 		# A sort is always a valid arity.
 		if arity.is_sort():
+			self.inductive_sort = arity
 			return
 		assert isinstance(arity, DependentProduct), "Arities must be a product terminating with a sort."
 		self.check_arity(arity.result_ty)
 
-	def add_constructor(self, con_name, base_ty):
+	def add_constructor(self, ctx, con_name, base_ty):
 		# XXX: Here's the really weird rule about how parameters wrap every constructor with products.
 		# I think this is right? It's really hard to find a description online that's clear.
 		ty = self.parameters.wrap_with_products(base_ty)
 		self.constructors[con_name] = Inductive.Constructor(ty, base_ty)
+
+		# The constructor is required to be nested products, ending in the inductive itself, with parameters and arity saturated.
+		tail = get_product_tail(base_ty)
+		ind, tail_args = extract_app_spine(tail)
+		assert ind == Var(self.name), "Inductive constructors must be a product, with the current inductive as the tail. %r != %s" % (ind, self.name)
+
+		# Make sure ty is well-typed assuming all the parameters are well-typed.
+		constructor_ctx = self.parameters.extend_context_with_typing(ctx)
+		# Add the assumption of typing the overall inductive.
+		constructor_ctx = constructor_ctx.extend_ty(Var(self.name), self.computed_type)
+		cons_sort = base_ty.infer(constructor_ctx)
+		print "Got:", cons_sort
+		assert cons_sort.is_sort()
+		assert cons_sort == self.inductive_sort
+
 		# XXX: TODO: Check positivity!
 		# This is necessary for consistency!
 
@@ -969,8 +985,8 @@ if __name__ == "__main__":
 #		Parameters(["T"], [parse("Type0")]),
 #		parse("(forall x : T . Type0)"),
 	)
-	nat.add_constructor("O", parse("nat"))
-	nat.add_constructor("S", parse("(forall _ : nat . nat)"))
+	nat.add_constructor(ctx, "O", parse("nat"))
+	nat.add_constructor(ctx, "S", parse("(forall _ : nat . nat)"))
 	nat.pprint()
 
 	x = parse("(@nat.S @nat.O)")

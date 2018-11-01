@@ -42,10 +42,6 @@ def vernac_inductive(context, vernac):
 		arity,
 	)
 
-	# Add the inductive in globally before we build constructors
-	# because the constructors must reference the inductive itself.
-	context.extend_def(easy.Var(str(name)), easy.InductiveRef(str(name)), in_place=True)
-
 	# Add the constructors.
 	for constructor in constructors.children:
 		con_name, con_typed_params, con_type = constructor.children
@@ -53,7 +49,11 @@ def vernac_inductive(context, vernac):
 		# In this case the typed params are just sugar for extending the type,
 		# so apply the con_typed_params as additional products around the type.
 		con_type = parsing.wrap_with_typed_params(context, con_typed_params, con_type, "dependent_product")
-		ind.add_constructor(str(con_name), con_type)
+		ind.add_constructor(context, str(con_name), con_type)
+
+	# Add the inductive in globally for use by later definitions.
+	context.extend_def(easy.Var(str(name)), easy.InductiveRef(str(name)), in_place=True)
+
 	print "Added:"
 	ind.pprint()
 

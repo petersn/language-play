@@ -11,7 +11,7 @@ Inductive bool : Type0 :=
 	| false : bool
 	| true : bool.
 
-Inductive eq (A : Type0) (x : A) : A -> Prop := eq_refl : eq x x.
+Inductive eq (A : Type0) (x : A) : A -> Prop := eq_refl : eq A x x.
 
 Check eq::eq_refl nat nat::O : eq nat nat::O nat::O.
 
