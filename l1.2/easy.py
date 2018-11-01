@@ -753,7 +753,7 @@ class Match(Term):
 		assert len(in_args) == len(matchand_arity_saturating)
 		for arg, ty in zip(in_args, matchand_arity_saturating):
 			final_return_type.subst(arg, ty)
-		final_return_type.subst(self.as_term, self.matchand)
+		final_return_type = final_return_type.subst(self.as_term, self.matchand)
 
 		# XXX: TODO: I'm *really* worried that the above code has a bug due to substitution potentially clashing with other variables, or maybe shadowing/capturing something.
 		# I should really just totally ban unbound variables in the AST...
@@ -851,7 +851,7 @@ def compare_terms(ctx, t1, t2):
 	t1 = t1.normalize(ctx, EvalStrategy.CBV)
 	t2 = t2.normalize(ctx, EvalStrategy.CBV)
 	# TODO: Maybe implement the additional rules that Spartan TT does?
-	return alpha_equivalent(t1, t2)
+	return alpha_equivalent(ctx, t1, t2)
 
 def coerce_to_product(ctx, term):
 	assert isinstance(term, Term)
@@ -860,8 +860,13 @@ def coerce_to_product(ctx, term):
 	return term
 
 class AlphaCanonicalizer:
-	def __init__(self):
+	def __init__(self, ctx):
+		# We need to make sure to not be alpha-indifferent to variables that are actually bound in the context, so map every context variable to itself.
 		self.subs = {}
+		for var in ctx.typings:
+			self.subs[var] = var
+		for var in ctx.definitions:
+			self.subs[var] = var
 		self.next_var_counter = 0
 
 	def new_var(self):
@@ -915,12 +920,12 @@ class AlphaCanonicalizer:
 			return t
 		raise NotImplementedError("Unhandled: %r" % (t,))
 
-def alpha_canonicalize(term):
-	canonicalizer = AlphaCanonicalizer()
+def alpha_canonicalize(ctx, term):
+	canonicalizer = AlphaCanonicalizer(ctx)
 	return canonicalizer.canonicalize(term)
 
-def alpha_equivalent(t1, t2):
-	return alpha_canonicalize(t1) == alpha_canonicalize(t2)
+def alpha_equivalent(ctx, t1, t2):
+	return alpha_canonicalize(ctx, t1) == alpha_canonicalize(ctx, t2)
 
 """
 class HoleFiller:
@@ -993,7 +998,7 @@ if __name__ == "__main__":
 	e2 = easy_parse.parse_term("(fun z : J . (fun y : Type0 . y))")
 	print e1
 	print e2
-	print alpha_equivalent(e1, e2)
+	print alpha_equivalent(ctx, e1, e2)
 
 #	print "=== Testing inference"
 #	e = easy_parse.parse_term("(fun x : (forall y : Type0 . y) . (x x))")
