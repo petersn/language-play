@@ -102,6 +102,10 @@ class Parameters:
 		self.names = names
 		self.types = types
 
+	def __len__(self):
+		assert len(self.names) == len(self.types)
+		return len(self.names)
+
 	def wrap_with(self, term, wrapper):
 		for name, ty in zip(self.names, self.types)[::-1]:
 			term = wrapper(Var(name), ty, term)
@@ -127,9 +131,16 @@ class Parameters:
 
 class Inductive:
 	class Constructor:
-		def __init__(self, ty):
+		def __init__(self, ty, base_ty):
+			"""__init__(self, ty, base_ty)
+
+			ty is the actual overall type of the constructor.
+			base_ty is the type of the constructor as written in the Inductive definition, before it was wrapped with a product over the inductive's parameters.
+			"""
 			assert isinstance(ty, Term)
+			assert isinstance(base_ty, Term)
 			self.ty = ty
+			self.base_ty = ty
 
 	def __init__(self, ctx, name, parameters, arity):
 		assert isinstance(name, str)
@@ -156,11 +167,11 @@ class Inductive:
 		assert isinstance(arity, DependentProduct), "Arities must be a product terminating with a sort."
 		self.check_arity(arity.result_ty)
 
-	def add_constructor(self, con_name, ty):
+	def add_constructor(self, con_name, base_ty):
 		# XXX: Here's the really weird rule about how parameters wrap every constructor with products.
 		# I think this is right? It's really hard to find a description online that's clear.
-		ty = self.parameters.wrap_with_products(ty)
-		self.constructors[con_name] = Inductive.Constructor(ty)
+		ty = self.parameters.wrap_with_products(base_ty)
+		self.constructors[con_name] = Inductive.Constructor(ty, base_ty)
 		# XXX: TODO: Check positivity!
 		# This is necessary for consistency!
 
@@ -255,6 +266,8 @@ class SortType(Term):
 #		return SortType(self.universe_index + 1)
 
 	def check(self, ctx, ty):
+		# XXX: Implement universe cumulativity here!
+		# FIXME: Currently this code forces Type{i} : Type{i}
 		if ty != self:
 			raise TypeCheckFailure("Failure to match: %r != %r" % (ty, self))
 
@@ -464,6 +477,9 @@ class InductiveRef(Term):
 	def free_vars(self):
 		return set()
 
+	def get_inductive(self, ctx):
+		return ctx.inductives[self.name]
+
 class ConstructorRef(Term):
 	def __init__(self, name, con_name):
 		self.name = name
@@ -479,13 +495,16 @@ class ConstructorRef(Term):
 		return self
 
 	def do_infer(self, ctx):
-		return self.get_inductive(ctx).constructors[self.con_name].ty
+		return self.get_constructor(ctx).ty
 
 	def free_vars(self):
 		return set()
 
 	def get_inductive(self, ctx):
 		return ctx.inductives[self.name]
+
+	def get_constructor(self, ctx):
+		return self.get_inductive(ctx).constructors[self.con_name]
 
 class Fix(Term):
 	def __init__(self, recursive_name, params, ty, body):
@@ -641,16 +660,105 @@ class Match(Term):
 
 	def do_infer(self, ctx):
 		return_ty = self.get_return_type(ctx)
+
 		# First check that (matchand : I pars t_1 ... t_p)
 		# Where pars are our parameters, and the t_1 through t_p saturate the arity.
 		matchand_ty = self.matchand.infer(ctx).normalize(ctx, EvalStrategy.WHNF)
 		matchand_ty_head, matchand_ty_args = extract_app_spine(matchand_ty)
-		assert isinstance(matchand_ty_head, InductiveRef), "Bad matchand type: %s" % (matchand_ty,)
-		# Extract the parameters and arity-parameters of the indutive.
-		# XXX: FIXME: Various other checks are required!
-		# Also, dependent matching isn't implemented appropriately: I still need to apply substitutionss on the return type.
-		return self.get_return_type(ctx) #self.return_term
-#		return SortType(7)
+		assert isinstance(matchand_ty_head, InductiveRef), "Bad matchand ilk: %s" % (matchand_ty,)
+
+		# XXX: Check that the inductive in question (matchand_ty_head) is referencing the right inductive!
+		inductive = matchand_ty_head.get_inductive(ctx)
+
+		# Now we check that our return_ty actually resolves to a sort appropriately.
+		# First we need to construct the appropriate type to ascribe to our as_term variable which is available to return_ty.
+		# The key detail is that this type is (I pars y_1 ... y_p), where pars is filled in by the type
+		# inferred for the matchand, and where y_1 through y_p are determined by the in_term.
+		# This is a little bit complicated, but just how it works.
+		# Therefore, we want our as_term_type to be the inductive (I) applied first to the pars from matchand_ty_args, then to the arity-saturating part of in_term.
+		pars = matchand_ty_args[:len(inductive.parameters)]
+		_, in_args = extract_app_spine(self.in_term)
+		_, arity_tys = extract_product_spine(inductive.arity)
+		assert len(in_args) == len(arity_tys), "Extended match's in term must have exactly the same number of arguments as number of arguments in the inductive's arity (not its parameters!)"
+
+		as_term_type = form_app_spine(form_app_spine(matchand_ty_head, pars), in_args)
+		print "As term type:", as_term_type
+		# We now have formed as_term_type = (I pars y_1 ... y_p)
+
+		# We now need to extract the types for each of the named parameters in the in_term.
+		return_ctx = ctx.copy()
+		for arg, ty in zip(in_args, arity_tys):
+			return_ctx.extend_ty(arg, ty, in_place=True)
+		return_ctx.extend_ty(self.as_term, as_term_type, in_place=True)
+
+		# This corresponds to the second line in the typing rule on the bottom of page 7 of this document:
+		#     https://hal.inria.fr/hal-01094195/document (Introduction to the Calculus of Inductive constructions)
+		# Namely, the requirement that is written:
+		#      y_1 \dots y_p, x : I pars y_1 \dots y_p \vdash P : s'
+		return_sort = return_ty.infer(return_ctx)
+		assert return_sort.is_sort()
+
+		# Check that we have exactly one arm for each constructor of our inductive.
+		arm_constructors = collections.Counter(arm.pattern_head for arm in self.arms)
+		all_constructors = collections.Counter(
+			ConstructorRef(inductive.name, cons_name)
+			for cons_name in inductive.constructors
+		)
+		assert arm_constructors == all_constructors, "Arms of match failed to be exhaustive and mutually-exclusive! %r != %r" % (arm_constructors, all_constructors)
+
+		# Check that every arm is well-typed.
+		for arm in self.arms:
+			constructor = arm.pattern_head.get_constructor(ctx)
+			# We now pull out the constructor args (x_1 : A_1) ... (x_n : A_n) (from the above paper).
+			_, cons_args_tys = extract_product_spine(constructor.base_ty)
+
+			arm_ctx = ctx.copy()
+			for arg, ty in zip(arm.pattern_args, cons_args_tys):
+				arm_ctx.extend_ty(arg, ty, in_place=True)
+
+			# Next we pull out the arity-saturating (the u_1 ... u_p from the paper) of the arguments to the inductive at end of the constructor's type.
+			tail = get_product_tail(constructor.base_ty)
+			tail_head, tail_args = extract_app_spine(tail)
+
+			# NB: These next two asserts should technically be redundant with the well-formedness checks that occur when the inductive was formed.
+			# TODO: Evaluate if I want to do these at all.
+
+			# We normalize in this check because tail_head will be a var in general.
+			assert tail_head.normalize(ctx, EvalStrategy.WHNF) == InductiveRef(inductive.name), "Bad constructor head: %r (BUG BUG BUG: This should have been ruled out when the inductive was formed.)" % (tail,)
+
+			# The number of tail args should be exactly len(params) + len(arity).
+			assert len(tail_args) == len(inductive.parameters) + len(arity_tys), "Malformed tail in inductive constructor! (BUG BUG BUG: This should have been caught when the inductive was formed.)"
+
+			# These are the u_1 ... u_p from the paper.
+			arity_saturating_ind_app_args = tail_args[-len(arity_tys):]
+			assert len(in_args) == len(arity_saturating_ind_app_args) == len(arity_tys)
+
+			demanded_type = return_ty
+			for arg, ty in zip(in_args, arity_saturating_ind_app_args):
+				demanded_type = demanded_type.subst(arg, ty)
+			demanded_type = demanded_type.subst(
+				self.as_term,
+				form_app_spine(arm.pattern_head, arm.pattern_args),
+			)
+
+			# Do the well-typedness check on the arm's body.
+			# This corresponds to the final line above the solidus on the typing rule for match at the bottom of page 7 of the paper.
+			arm.result.check(arm_ctx, demanded_type)
+
+		# Extract t_1 ... t_p from the paper.
+		matchand_arity_saturating = matchand_ty_args[-len(arity_tys):]
+
+		# Compute the final (dependent) return type.
+		final_return_type = return_ty
+		assert len(in_args) == len(matchand_arity_saturating)
+		for arg, ty in zip(in_args, matchand_arity_saturating):
+			final_return_type.subst(arg, ty)
+		final_return_type.subst(self.as_term, self.matchand)
+
+		# XXX: TODO: I'm *really* worried that the above code has a bug due to substitution potentially clashing with other variables, or maybe shadowing/capturing something.
+		# I should really just totally ban unbound variables in the AST...
+
+		return final_return_type
 
 	def free_vars(self):
 		# XXX: This is probably wrong, as the as_term and in_term parts form bindings that should eliminate free variables from the return_term part.
@@ -713,10 +821,31 @@ class Hole(Term):
 # ===== End term ilks =====
 
 def extract_app_spine(term):
+	assert isinstance(term, Term)
 	if isinstance(term, Application):
 		head, args = extract_app_spine(term.fn)
-		return head, args + [term.arg]
+		return head, args + [term.arg] # XXX: Quadratic time. :(
 	return term, []
+
+def form_app_spine(fn, args):
+	for arg in args:
+		fn = Application(fn, arg)
+	return fn
+
+# FIXME: Make this return a Parameters, and simplify the code base.
+def extract_product_spine(term):
+	assert isinstance(term, Term)
+	if isinstance(term, DependentProduct):
+		# XXX: Quadratic time. :(
+		variables, tys = extract_product_spine(term.result_ty)
+		return [term.var] + variables, [term.var_ty] + tys
+	return [], []
+
+def get_product_tail(term):
+	assert isinstance(term, Term)
+	while isinstance(term, DependentProduct):
+		term = term.result_ty
+	return term
 
 def compare_terms(ctx, t1, t2):
 	t1 = t1.normalize(ctx, EvalStrategy.CBV)

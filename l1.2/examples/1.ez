@@ -66,7 +66,7 @@ Definition nat_ind :=
 		| nat::S n0 => f0 n0 (F n0)
 		end.
 
-Eval o___________________________________________.
+#Eval o___________________________________________.
 
 Check nat_ind : nat_ind_type.
 
