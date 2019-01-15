@@ -4,21 +4,6 @@ import pprint
 import antlr4
 from antlr_parser import langLexer, langParser
 
-s = """
-data Nat {
-	Z,
-	S(Nat),
-}
-
-fn plus(x : Nat, y) -> Nat {
-	let z = foo(x, y);
-	match x {
-		Nat::Z => y,
-		Nat::S(x) => plus(x, Nat::S(y)),
-	}
-}
-"""
-
 allowed_variadic = set([
 	"dataConstructorSpec",
 	"matchConstructor",

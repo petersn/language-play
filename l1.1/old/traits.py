@@ -1,7 +1,6 @@
 #!/usr/bin/python
 
 import copy
-import UnionFind
 import inference
 import core
 import utils

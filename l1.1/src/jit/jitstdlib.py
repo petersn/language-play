@@ -82,7 +82,7 @@ def populate_kinds():
 	])
 
 	jitcore.kind_table.new_kind("str")
-	jitcore.boxify_kind_table[jitcore.ValueType.UNBOXED_BOOL] = jitcore.kind_table["str"]
+	#jitcore.boxify_kind_table[jitcore.ValueType.UNBOXED_BOOL] = jitcore.kind_table["str"]
 	jitcore.kind_table["str"].add_slots([
 		# This is based off of sizeof(std::string) == 32, empirically.
 		# XXX: Very fragile! Fix this horrificness.

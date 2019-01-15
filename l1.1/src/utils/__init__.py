@@ -1,9 +1,11 @@
 #!/usr/bin/python
 """
-utils.py
+utils/__init__.py
 
 Simple shared functionality and snippets.
 """
+
+from UnionFind import *
 
 def indent(depth, s):
 	return "\n".join(
@@ -71,6 +73,9 @@ def pretty(obj):
 class HashableMixin:
 	def __eq__(self, other):
 		return self.__class__ is other.__class__ and self.key() == other.key()
+
+	def __ne__(self, other):
+		return not (self == other)
 
 	def __hash__(self):
 		return hash(self.key())

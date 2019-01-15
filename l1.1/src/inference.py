@@ -1,7 +1,6 @@
 #!/usr/bin/python
 
 import sys
-import UnionFind
 import dependency
 import core
 import utils
@@ -33,7 +32,7 @@ class UnificationError(Exception):
 
 class UnificationContext:
 	def __init__(self):
-		self.unions = UnionFind.UnionFind()
+		self.unions = utils.UnionFind()
 		self.union_set_links = {}
 
 	def copy(self):
@@ -220,6 +219,14 @@ class Inference:
 			gamma_prime = gamma.copy()
 			gamma_prime[var] = var_poly_t
 			return self.J(gamma_prime, expr.expr2, depth=depth+1)
+		elif isinstance(expr, core.IfExpr):
+			cond_t = self.J(gamma, expr.cond_expr, depth=depth+1)
+			true_t = self.J(gamma, expr.true_expr, depth=depth+1)
+			false_t = self.J(gamma, expr.false_expr, depth=depth+1)
+			self.unification_context.equate(
+				true_t, false_t,
+			)
+			return true_t
 		elif isinstance(expr, core.BlockExpr):
 			self.infer_code_block(gamma, expr.code_block, depth=depth+1)
 			# TODO: Extract the block's return type here.
@@ -258,7 +265,7 @@ class Inference:
 
 		# Compute an order to perform inference in.
 		strongly_connected_components = dep_manager.strongly_connected_components()
-#		print "\nStrongly connected components:", strongly_connected_components
+		print "\nStrongly connected components:", strongly_connected_components
 
 		# Throw in every decl that wasn't included in any dep, and therefore isn't in any strongly connected component.
 		remaining_decls = set(code_block.entries)
@@ -270,12 +277,12 @@ class Inference:
 		for decl in remaining_decls:
 			strongly_connected_components.append([decl])
 
-#		print "Inference groups:", strongly_connected_components
+		print "Inference groups:", strongly_connected_components
 
 		# Compute typing for each strongly connected component together.
 		for component in strongly_connected_components:
 			name_types = {}
-#			print "=== Inference for component:", component
+			print "=== Inference for component:", component
 
 			# Add fresh monotype variables to our system for the names declared in this component.
 			for decl in component:
@@ -292,6 +299,8 @@ class Inference:
 					type_expr = self.J(gamma, decl.expr, depth=depth+1)
 					# TODO: XXX: Appropriately unify with a return type variable.
 					self.unification_context.equate(gamma.return_monotype, type_expr)
+				elif isinstance(decl, core.ExprEvaluation):
+					self.J(gamma, decl.expr, depth=depth+1)
 				else:
 					raise NotImplementedError("unhandled decl in inference: %r" % (decl,))
 

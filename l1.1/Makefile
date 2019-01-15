@@ -1,7 +1,7 @@
 
 all:
 	$(MAKE) -C antlr_parser/
-	$(MAKE) -C jit/
+	$(MAKE) -C src/jit/
 
 .PHONY: test
 test:
@@ -9,5 +9,6 @@ test:
 
 .PHONY: clean
 clean:
-	$(MAKE) -C antlr_parser clean
+	$(MAKE) -C antlr_parser/ clean
+	$(MAKE) -C src/jit/ clean
 
